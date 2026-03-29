@@ -16,3 +16,8 @@ For reproducibility, we report all the info about the CRS of the area (CRS:  EPS
   - hfp_2.tif: human footprint raster
   - PO_dog.shp + PO_cat.shp: roadkills data set
   - PA_dog.shp + PA_cat.shp: re-classification into presence absence Data for counts data
+ 
+## Utils Folder ##
+It contains:
+- Packages used in the code (Packages.R)
+- External function used in the code that for readability have been placed in here (Utils.R)
