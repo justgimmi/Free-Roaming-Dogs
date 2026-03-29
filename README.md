@@ -10,7 +10,7 @@ For reproducibility, we report all the info about the CRS of the area (CRS:  EPS
   - Quadriculas_transectos_Portugal.shp: grid shape files containing urbanization gradient
 
 - Camera Trap  --> Raw cats & dogs camera trap sightseeing
-  - Dogs_records_final.csv: dogs camera trap after 30 min filtering to avoid multiple counts of the same individual
+- Dogs_records_final.csv: dogs camera trap after 30 min filtering to avoid multiple counts of the same individual
 - Database_Dogs&Cats:
   - Counts_dog.shp + Counts_cat.shp : grid cell counts
   - hfp_2.tif: human footprint raster
