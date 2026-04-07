@@ -530,14 +530,31 @@ network_l <- network_por %>%
 
 
 # save(boundary_l, collision_l, camera_l, counts_l, roads_l, quad_l, network_l,  file = "leaflet.RData")
-# load("leaflet.RData")
+load("leaflet.RData")
 target_classes <- c("motorway", "primary", "residential", "secondary", 
                     "tertiary", "track", "trunk", "unclassified")
 road_pal <- colorFactor(palette = "viridis", domain = target_classes)
 quad_centroids <- st_centroid(quad_l)
-leaflet() %>%
+camera_years <- split(camera_l, camera_l$year)
+available_years <- names(camera_years)
+map <- leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>% 
-  addPolygons(data = boundary_l, color = "black", weight = 2, fillOpacity = 0, group = "Study Area") %>%
+  addPolygons(data = boundary_l, color = "black", weight = 2, fillOpacity = 0, group = "Study Area")
+  
+for(yr in available_years) {
+  map <- map %>%
+    addCircleMarkers(
+      data = camera_years[[yr]],
+      color = "#2980b9", 
+      radius = 5, 
+      stroke = TRUE, 
+      weight = 1, 
+      fillOpacity = 0.8,
+      group = paste("Camera Traps -", yr), # Unique group name per year
+      label = ~paste("Year:", yr)
+    )
+}
+map <- map %>%  
   addPolygons(data = quad_l, 
               color = "white", 
               weight = 1, 
@@ -576,9 +593,9 @@ leaflet() %>%
                    group = "Collisions",
                    label = ~paste("Roadkill - Near:", road_class)) %>%
   
-  addCircleMarkers(data = camera_l,
-                   color = "#2980b9", radius = 5, stroke = TRUE, weight = 1, fillOpacity = 0.8,
-                   group = "Camera Traps") %>%
+  # addCircleMarkers(data = camera_l,
+  #                  color = "#2980b9", radius = 5, stroke = TRUE, weight = 1, fillOpacity = 0.8,
+  #                  group = "Camera Traps") %>%
   
   addCircleMarkers(data = counts_l,
                    color = "#f39c12", radius = ~rai_km * 4 + 3, stroke = TRUE, weight = 1, fillOpacity = 0.6,
@@ -590,10 +607,10 @@ leaflet() %>%
       "Sampling Grids", 
       "RAI Values",     
       "Local Network", 
-      "OSM Roads", 
+      "Collisions Roads", 
       "Collisions", 
-      "Camera Traps", 
-      "Counts (RAI)"
+      "Counts (RAI)",
+      paste("Camera Traps -", available_years) 
     ),
     options = layersControlOptions(collapsed = FALSE)
   ) %>%
@@ -604,26 +621,27 @@ leaflet() %>%
             labels = c("Collisions", "Camera Traps", "Counts (RAI)", "Transect Network", "Grids"),
             title = "Survey Components")
 
+map
 ####### Portugal Boundary #####
 
-pt.gadm <- gadm(country='Portugal', level=0)
-pt.lim = data.frame(ylim=c(36.6, 43), xlim=c(-10, -4.0))
-pt.bbox <- st_bbox(c(xmin=pt.lim$xlim[1],
-                     xmax=pt.lim$xlim[2],
-                     ymin=pt.lim$ylim[1],
-                     ymax=pt.lim$ylim[2]))
-
-loc.lim = data.frame(ylim=c(40.6, 40.9), xlim=c(-8.8, -8.4))
-loc.bbox <- st_bbox(c(
-  xmin=loc.lim$xlim[1],
-  xmax=loc.lim$xlim[2],
-  ymin=loc.lim$ylim[1],
-  ymax=loc.lim$ylim[2]))
-pt.gadm <- sf::st_as_sf(pt.gadm) %>% 
-  st_crop(pt.bbox)
-boundary_sf
-pt.gadm |>
-  st_transform(crs) -> boundary_sf
+# pt.gadm <- gadm(country='Portugal', level=0)
+# pt.lim = data.frame(ylim=c(36.6, 43), xlim=c(-10, -4.0))
+# pt.bbox <- st_bbox(c(xmin=pt.lim$xlim[1],
+#                      xmax=pt.lim$xlim[2],
+#                      ymin=pt.lim$ylim[1],
+#                      ymax=pt.lim$ylim[2]))
+# 
+# loc.lim = data.frame(ylim=c(40.6, 40.9), xlim=c(-8.8, -8.4))
+# loc.bbox <- st_bbox(c(
+#   xmin=loc.lim$xlim[1],
+#   xmax=loc.lim$xlim[2],
+#   ymin=loc.lim$ylim[1],
+#   ymax=loc.lim$ylim[2]))
+# pt.gadm <- sf::st_as_sf(pt.gadm) %>% 
+#   st_crop(pt.bbox)
+# boundary_sf
+# pt.gadm |>
+#   st_transform(crs) -> boundary_sf
 #save(boundary_sf, file = file.path(data_path, "Boundary_sf.RData"))
 # ggplot() + 
 #   geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
