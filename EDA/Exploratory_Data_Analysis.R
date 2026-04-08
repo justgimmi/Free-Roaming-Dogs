@@ -209,9 +209,55 @@ load(file.path(Camera_folder, "Camera_dogs.RData"))
 #     month = month(timestamp)           
 #   )
 
+
+
+# Record_table <- read_xlsx(path = file.path(Camera_folder, "RecordTable_CTs.xlsx")) # real presence absence 
+# Database_Dog <- read_xlsx(path = file.path(Camera_folder, "DatabaseDog_CTs.xlsx")) # here we have instead when dogs have been taken!
+# Database_Dog$Timestamp <- as.POSIXct(Database_Dog$Timestamp)
+# Database_Dog_Filtered <- Database_Dog %>%
+#   arrange(POINT_STANDARD, Timestamp) %>%
+#   group_by(POINT_STANDARD) %>%
+#   mutate(
+#     time_diff = as.numeric(difftime(Timestamp, lag(Timestamp), units = "mins"))
+#   ) %>%
+#   filter(is.na(time_diff) | time_diff >= 30) %>%
+#   select(-time_diff)
+# 
+# print(Database_Dog_Filtered, n = 20)
+# Record_table %>%
+#   select(POINT_STANDARD, EFFORT, X_COORD, Y_COORD, `Dog (P/A)`, INSTALLATION) |>
+#   distinct(POINT_STANDARD, .keep_all = TRUE) -> Record_table_new
+#   
+# Database_Dog_Filtered %>%
+#   left_join(Record_table_new, by = "POINT_STANDARD") -> prova
+# 
+# 
+# Absence_Rows <- Record_table %>%
+#   filter(`Dog (P/A)` == "no")
+# colnames(Final_Dataset)
+# Final_Dataset <- bind_rows(prova, Absence_Rows) |>
+#   select(-c( "Cat (P/A)" ))
+# 
+# 
+# Final_Dataset <- Final_Dataset %>%
+#   arrange(POINT_STANDARD, Timestamp)|>
+#   filter(!is.na(EFFORT) & EFFORT != "NA")|>
+#   st_as_sf(coords = c("X_COORD", "Y_COORD"))|>
+#   st_set_crs(4326) |>
+#   st_transform(crs)
+# 
+# write_sf(Final_Dataset, dsn = file.path(Camera_folder, "Presence_Absence.shp"))
+read_sf( file.path(Camera_folder, "Presence_Absence.shp"))
+
+p_prova <- ggplot() + 
+  geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
+  geom_sf(data = Final_Dataset, aes(color = `Dog (P/A)`), size = 1, alpha = 0.6) 
+
 p4 <- ggplot() + 
   geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
-  geom_sf(data = camera_trap_dogs, color = "firebrick", size = 1, alpha = 0.6) 
+  geom_sf(data = camera_trap_dogs_clean, color = "firebrick", size = 1, alpha = 0.6) 
+
+p4 + p_prova
 
 #ggsave(p4, filename = file.path(plot_path, "Camera_traps_not_cleaned.jpeg"), dpi = 100)
 p5 <- ggplot() +
