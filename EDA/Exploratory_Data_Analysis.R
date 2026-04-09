@@ -211,7 +211,7 @@ load(file.path(Camera_folder, "Camera_dogs.RData"))
 
 
 
-# Record_table <- read_xlsx(path = file.path(Camera_folder, "RecordTable_CTs.xlsx")) # real presence absence 
+# Record_table <- read_xlsx(path = file.path(Camera_folder, "RecordTable_CTs.xlsx")) # real presence absence
 # Database_Dog <- read_xlsx(path = file.path(Camera_folder, "DatabaseDog_CTs.xlsx")) # here we have instead when dogs have been taken!
 # Database_Dog$Timestamp <- as.POSIXct(Database_Dog$Timestamp)
 # Database_Dog_Filtered <- Database_Dog %>%
@@ -227,32 +227,37 @@ load(file.path(Camera_folder, "Camera_dogs.RData"))
 # Record_table %>%
 #   select(POINT_STANDARD, EFFORT, X_COORD, Y_COORD, `Dog (P/A)`, INSTALLATION) |>
 #   distinct(POINT_STANDARD, .keep_all = TRUE) -> Record_table_new
-#   
+# 
 # Database_Dog_Filtered %>%
 #   left_join(Record_table_new, by = "POINT_STANDARD") -> prova
 # 
 # 
 # Absence_Rows <- Record_table %>%
 #   filter(`Dog (P/A)` == "no")
-# colnames(Final_Dataset)
+# # colnames(Final_Dataset)
 # Final_Dataset <- bind_rows(prova, Absence_Rows) |>
 #   select(-c( "Cat (P/A)" ))
 # 
 # 
 # Final_Dataset <- Final_Dataset %>%
-#   arrange(POINT_STANDARD, Timestamp)|>
-#   filter(!is.na(EFFORT) & EFFORT != "NA")|>
+#   arrange(POINT_STANDARD, Timestamp) -> Final_Dataset
+# Final_Dataset$EFFORT <- as.numeric(Final_Dataset$EFFORT)
+#   
+# Final_Dataset |>
+#   filter(!is.na(EFFORT))|>
 #   st_as_sf(coords = c("X_COORD", "Y_COORD"))|>
 #   st_set_crs(4326) |>
-#   st_transform(crs)
+#   st_transform(crs) -> Final_Dataset
+# Final_Dataset$Timestamp <- as.POSIXct(Final_Dataset$Timestamp)
+# Final_Dataset$EFFORT
 # 
 # write_sf(Final_Dataset, dsn = file.path(Camera_folder, "Presence_Absence.shp"))
-read_sf( file.path(Camera_folder, "Presence_Absence.shp"))
-
+PA_dogs <- read_sf( file.path(Camera_folder, "Presence_Absence.shp"))
+PA_dogs$Timstmp
 p_prova <- ggplot() + 
   geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
-  geom_sf(data = Final_Dataset, aes(color = `Dog (P/A)`), size = 1, alpha = 0.6) 
-
+  geom_sf(data = PA_dogs, aes(color = `Dg(P/A)`), size = 1, alpha = 0.6) 
+p_prova
 p4 <- ggplot() + 
   geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
   geom_sf(data = camera_trap_dogs_clean, color = "firebrick", size = 1, alpha = 0.6) 
@@ -441,6 +446,17 @@ cov_env_pres <- ggplot(pa_long_clean, aes(x = Npres, y = Value, fill = Npres)) +
         strip.text = element_text(face = "bold"))
 
 # ggsave(cov_env_pres, filename = file.path(plot_path, "PA_Niche_Comparison.jpeg"), dpi = 100, width = 30, height = 25, units = "cm")
+
+p_prova <- ggplot() + 
+  geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
+  geom_sf(data = PA_dogs, aes(color = `Dg(P/A)`), size = 1, alpha = 0.6) 
+p_prova
+
+p_prova2 <- ggplot() + 
+  geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
+  geom_sf(data = presence_absence_dogs, aes(color = as.factor(Npres)), size = 1, alpha = 0.6) 
+p_prova + p_prova2
+
 
 p_abs <- ggplot() +
   geom_sf(data = boundary_sf, fill = "grey95", color = "black") +
