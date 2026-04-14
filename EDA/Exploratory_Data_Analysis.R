@@ -214,6 +214,7 @@ load(file.path(Camera_folder, "Camera_dogs.RData"))
 # Record_table <- read_xlsx(path = file.path(Camera_folder, "RecordTable_CTs.xlsx")) # real presence absence
 # Database_Dog <- read_xlsx(path = file.path(Camera_folder, "DatabaseDog_CTs.xlsx")) # here we have instead when dogs have been taken!
 # Database_Dog$Timestamp <- as.POSIXct(Database_Dog$Timestamp)
+# Database_Dog[Database_Dog$POINT_STANDARD == "DARIO_149 _ 04", ]
 # Database_Dog_Filtered <- Database_Dog %>%
 #   arrange(POINT_STANDARD, Timestamp) %>%
 #   group_by(POINT_STANDARD) %>%
@@ -242,7 +243,7 @@ load(file.path(Camera_folder, "Camera_dogs.RData"))
 # Final_Dataset <- Final_Dataset %>%
 #   arrange(POINT_STANDARD, Timestamp) -> Final_Dataset
 # Final_Dataset$EFFORT <- as.numeric(Final_Dataset$EFFORT)
-#   
+# 
 # Final_Dataset |>
 #   filter(!is.na(EFFORT))|>
 #   st_as_sf(coords = c("X_COORD", "Y_COORD"))|>
@@ -414,23 +415,130 @@ target_classes <- c("motorway", "primary", "residential", "secondary",
 #             overwrite=TRUE)
 
 ####### Presence Absence ##### 
+# presence_absence_dogs <- Final_Dataset
+# presence_absence_dogs <-  read_sf( file.path(Camera_folder, "Presence_Absence.shp")) |>
+#   st_filter(boundary_sf)
+# presence_absence_dogs$Npres <- as.factor(presence_absence_dogs$`Dog (P/A)`)
+# levels(presence_absence_dogs$Npres) <- c(0, 1)
+# presence_absence_dogs$INSTALLATION <- dmy(presence_absence_dogs$INSTALLATION)
+# presence_absence_dogs<- presence_absence_dogs[-which(year(presence_absence_dogs$INSTALLATION) == 2018), ]
+# # write_sf(presence_absence_dogs, dsn = file.path(Camera_folder, "Presence_Absence.shp"))
+# save(presence_absence_dogs, file = file.path(Camera_folder, "PA.RData"))
+load(file = file.path(Camera_folder, "PA.RData"))
+# plot_data <- presence_absence_dogs %>%
+#   mutate(Year = year(INSTALL)) %>%
+#   group_by(Year, Npres) %>%
+#   summarise(Count = n(), .groups = 'drop')
+# 
+# pa_plot <- ggplot(plot_data, aes(x = as.factor(Year), y = Count, fill = as.factor(Npres))) +
+#   geom_bar(stat = "identity") +
+#   scale_fill_manual(values = c("0" = "#999999", "1" = "#E69F00"), 
+#                     labels = c("Absence (0)", "Presence (1)")) +
+#   labs(title = "Animal Presence Records by Year",
+#        x = "Year",
+#        y = "Number of Observations",
+#        fill = "Record Status") +
+#   theme_minimal()
 
-presence_absence_dogs <-  read_sf(file.path(Database_Folder, "PA_dog.shp")) |>
-  st_filter(boundary_sf)
-presence_absence_dogs$Npres_factor <- as.factor(presence_absence_dogs$Npres)
+# ggsave(pa_plot, filename = file.path(plot_path, "PA_barplot.jpeg"), dpi = 100, width = 30, height = 25, units = "cm")
+presence_absence_dogs[presence_absence_dogs$POINT_STANDARD == "DARIO_149 _ 04", ]
 
-table(presence_absence_dogs$Npres)
+station_summaries <- presence_absence_dogs %>%
+  mutate(
+    Year = year(INSTALLATION),
+    Npres_num = as.numeric(as.character(Npres))
+  ) %>%
+  group_by(Year, POINT_STANDARD) %>%
+  summarise(Total_Detections = sum(Npres_num, na.rm = TRUE), .groups = 'drop')
+
+fit_data <- station_summaries %>%
+  group_by(Year) %>%
+  summarise(
+    lambda = mean(Total_Detections),
+    n_stations = n()
+  ) %>%
+  rowwise() %>%
+  do(data.frame(
+    Year = .$Year,
+    x = 0:20,
+    # Calculate Poisson PMF * total stations to match the bar heights
+    y = dpois(0:20, .$lambda) * .$n_stations
+  ))
+
+# 3. Build the plot
+det_plot <- ggplot(station_summaries, aes(x = Total_Detections)) +
+  geom_bar(fill = "steelblue", color = "white", alpha = 0.7) +
+  geom_line(data = fit_data, aes(x = x, y = y), 
+            color = "red", size = 1) +
+  geom_point(data = fit_data, aes(x = x, y = y), 
+             color = "red", size = 1.5) +
+  facet_wrap(~Year) +
+  coord_cartesian(xlim = c(0, 20), ylim = c(0, 550)) + 
+  labs(
+    title = "Frequency of Animal Detections per Station",
+    subtitle = "Blue bars: Observed counts | Red line: Poisson distribution (MLE)",
+    x = "Number of Detections",
+    y = "Number of Stations"
+  ) +
+  theme_minimal()
+
+print(det_plot)
+
+ggplot(station_summaries, aes(x = Total_Detections)) +
+  geom_bar(fill = "steelblue", color = "white") +
+  facet_wrap(~Year) +
+  labs(
+    title = "Frequency of Animal Detections per Station",
+    subtitle = "Number of stations categorized by how many times they recorded animals",
+    x = "Number of Detections (Sightings)",
+    y = "Number of Stations"
+  ) +
+  theme_minimal()
+table(station_summaries$Total_Detections)
+
+det_plot <-ggplot(station_summaries, aes(x = Total_Detections)) +
+  geom_bar(fill = "steelblue", color = "white") +
+  facet_wrap(~Year) +
+  # This zooms the plot to 0-30 without deleting the outlier from the dataset
+  coord_cartesian(xlim = c(0, 20), ylim = c(0, 550)) + 
+  labs(
+    title = "Frequency of Animal Detections per Station",
+    subtitle = "Reduced Number of stations categorized by detections",
+    x = "Number of Detections",
+    y = "Number of Stations"
+  ) +
+  theme_minimal()
+
+det_plot_r <-ggplot(station_summaries, aes(x = Total_Detections)) +
+  geom_bar(fill = "steelblue", color = "white") +
+  facet_wrap(~Year) +
+  # This zooms the plot to 0-30 without deleting the outlier from the dataset
+  coord_cartesian(xlim = c(21, 175), ylim = c(0, 15)) + 
+  labs(
+    title = "Frequency of Animal Detections per Station",
+    subtitle = "Reduced Number of stations categorized by detections",
+    x = "Number of Detections",
+    y = "Number of Stations"
+  ) +
+  theme_minimal()
+ggsave(det_plot, filename = file.path(plot_path, "Barplot_Reduced.jpeg"), dpi = 100, width = 30, height = 25, units = "cm")
+ggsave(det_plot_r, filename = file.path(plot_path, "Barplot_Reduced_right.jpeg"), dpi = 100, width = 30, height = 20, units = "cm")
+
+station_summaries[which(station_summaries$Total_Detections == 174), ]
+
+table(station_summaries$Total_Detections)
+
 cov_por_std <- terra::scale(cov_por)
 pa_env_values <- terra::extract(cov_por_std, vect(presence_absence_dogs))
 
 pa_comparison <- presence_absence_dogs %>%
   st_drop_geometry() %>%
   bind_cols(pa_env_values) %>%
-  select(Npres, names(cov_por))
+  select(`Dg(P/A)`, cov_names)
 
 pa_long <- pa_comparison %>%
-  pivot_longer(cols = -Npres, names_to = "Variable", values_to = "Value") %>%
-  mutate(Npres = ifelse(Npres == 1, "Presence", "Absence"))
+  pivot_longer(cols = -`Dg(P/A)`, names_to = "Variable", values_to = "Value") %>%
+  mutate(Npres = ifelse(`Dg(P/A)` == "yes", "Presence", "Absence"))
 pa_long_clean <- pa_long %>%
   drop_na(Value)
 
@@ -444,7 +552,6 @@ cov_env_pres <- ggplot(pa_long_clean, aes(x = Npres, y = Value, fill = Npres)) +
   theme_minimal(base_size = 14) +
   theme(legend.position = "none",
         strip.text = element_text(face = "bold"))
-
 # ggsave(cov_env_pres, filename = file.path(plot_path, "PA_Niche_Comparison.jpeg"), dpi = 100, width = 30, height = 25, units = "cm")
 
 p_prova <- ggplot() + 
@@ -452,10 +559,10 @@ p_prova <- ggplot() +
   geom_sf(data = PA_dogs, aes(color = `Dg(P/A)`), size = 1, alpha = 0.6) 
 p_prova
 
-p_prova2 <- ggplot() + 
-  geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
-  geom_sf(data = presence_absence_dogs, aes(color = as.factor(Npres)), size = 1, alpha = 0.6) 
-p_prova + p_prova2
+# p_prova2 <- ggplot() + 
+#   geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
+#   geom_sf(data = presence_absence_dogs, aes(color = as.factor(Npres)), size = 1, alpha = 0.6) 
+# p_prova + p_prova2
 
 
 p_abs <- ggplot() +
@@ -472,6 +579,7 @@ p_pres <- ggplot() +
   labs(title = "Known Presences") +
   theme_minimal()
 
+
 p_dots <- ggplot() +
   geom_sf(data = boundary_sf, fill = "grey95", color = "black") +
   geom_sf(data = camera_trap_dogs_clean, color = "#0072B2", size = 0.9, alpha = 0.4) +
@@ -481,7 +589,7 @@ p_dots <- ggplot() +
 
 camera_plot <- (p_abs | p_pres | p_dots) + 
   plot_annotation(theme = theme(plot.title = element_text(size = 20, face = "bold")))
-# ggsave(camera_plot, filename = file.path(plot_path, "Camera_traps_compared.jpeg"), dpi = 100, 
+# ggsave(camera_plot, filename = file.path(plot_path, "Camera_traps_compared.jpeg"), dpi = 100,
 #        height = 30, width = 50, units = "cm")
 
 
@@ -572,12 +680,12 @@ p_rai <- ggplot(eda_long, aes(x = rai_level, y = value, fill = rai_level)) +
 
 ggsave(p_rai, filename = file.path(plot_path, "cov_rai.jpeg"), dpi = 100,
        height = 30, width = 50, units = "cm")
-
 ####### Leafleet map #####
 boundary_l  <- st_transform(boundary_sf, 4326)
 collision_l <- st_transform(collision_dogs, 4326)
 camera_l    <- st_transform(camera_trap_dogs_clean, 4326)
 counts_l    <- st_transform(count_dogs, 4326) # Uses the eda_counts we made with RAI
+presence_absence_l <- st_transform(presence_absence_dogs, 4326)
 counts_l$rai_km <- (counts_l$Dog_obs/ count_dogs$Effrt_m)*1000 # this represents the amount of dogs captured per km
 names(collision_l)
 roads_l <- st_transform(relevant_roads, 4326)
@@ -590,8 +698,9 @@ grid_id_pal <- colorFactor(palette = "Set3", domain = quad_l$id)
 network_l <- network_por %>% 
   st_transform(4326)
 
-
-# save(boundary_l, collision_l, camera_l, counts_l, roads_l, quad_l, network_l,  file = "leaflet.RData")
+# 
+# save(boundary_l, collision_l, camera_l, counts_l, roads_l, quad_l, network_l, 
+#      presence_absence_l,file = "leaflet.RData")
 load("leaflet.RData")
 target_classes <- c("motorway", "primary", "residential", "secondary", 
                     "tertiary", "track", "trunk", "unclassified")
@@ -599,6 +708,10 @@ road_pal <- colorFactor(palette = "viridis", domain = target_classes)
 quad_centroids <- st_centroid(quad_l)
 camera_years <- split(camera_l, camera_l$year)
 available_years <- names(camera_years)
+pa_pal <- colorFactor(
+  palette = c("grey70", "#27ae60"),  # 0 = assenza, 1 = presenza
+  domain = c("no", "yes")
+)
 map <- leaflet() %>%
   addProviderTiles(providers$CartoDB.Positron) %>% 
   addPolygons(data = boundary_l, color = "black", weight = 2, fillOpacity = 0, group = "Study Area")
@@ -654,6 +767,15 @@ map <- map %>%
                    color = "#e74c3c", radius = 4, stroke = FALSE, fillOpacity = 0.7,
                    group = "Collisions",
                    label = ~paste("Roadkill - Near:", road_class)) %>%
+  addCircleMarkers(
+    data = presence_absence_l,
+    color = ~pa_pal(`Dg(P/A)`),
+    radius = 5,
+    stroke = TRUE,
+    weight = 1,
+    fillOpacity = 0.7,
+    group = "Presence / Absence")%>%
+  
   
   # addCircleMarkers(data = camera_l,
   #                  color = "#2980b9", radius = 5, stroke = TRUE, weight = 1, fillOpacity = 0.8,
@@ -672,6 +794,7 @@ map <- map %>%
       "Collisions Roads", 
       "Collisions", 
       "Counts (RAI)",
+      "Presence / Absence",
       paste("Camera Traps -", available_years) 
     ),
     options = layersControlOptions(collapsed = FALSE)
