@@ -3,6 +3,7 @@ path <- "C:/Users/gmsan/Documents/GitHub/Street_Dog_Cats"
 setwd(path)
 data_path <- file.path(path, "Data")
 utils_path <- file.path(path, "Utils")
+plot_path <- file.path(path, "Models/Plot_PA")
 source(file.path(utils_path, "Packages.R"))
 load(file.path(data_path, "Boundary_sf.RData"))
 load(file.path(data_path, "Camera Trap/PA.RData"))
@@ -35,63 +36,231 @@ mesh <- fm_mesh_2d(
 )
 
 plot(mesh)
-# spde <- inla.spde2.pcmatern(
-#   mesh = mesh,
-#   prior.range = c(100000, 0.5), # Median range of 1000m
-#   prior.sigma = c(1, 0.5)     # Prior for spatial variance
+
+
+
+###### Marked Point Process #####
+# Starting from the idea that there is a link between where the realizations occurs and the presence/absence nature of the data
+# to mitigate this possible source of bias, we could first of all build a model using the presence only nature of the camera trap
+# and in a second phase 
+
+spde_shared <- inla.spde2.pcmatern(
+  mesh = mesh,
+  prior.range = c(100000, 0.5),
+  prior.sigma = c(1, 0.5)
+)
+
+spde_mark <- inla.spde2.pcmatern(
+  mesh = mesh,
+  prior.range = c(100000, 0.5),
+  prior.sigma = c(1, 0.5)
+)
+
+
+
+pa_sf <- st_as_sf(pa_final)
+pa_final$Presence <- as.numeric(pa_final$Npres) - 1
+# table(pa_final$Npres)
+cov_por$forest <- scale(cov_por$forest, center = TRUE, scale = TRUE)
+values(cov_por$forest)
+cov_por$forest[is.na(cov_por$forest)] <- 0
+is.na(values(cov_por$forest))
+cmp <- geometry + Presence ~ 
+  beta0_int(1) +
+  beta0_mark(1) +
+  u(geometry, model = spde_shared) + 
+  u_copy(geometry, copy = "u", fixed = FALSE)+
+  forest_int(cov_por$forest, model = "linear")
+
+bru_options_set(
+  bru_verbose = TRUE,
+  verbose = TRUE,
+  bru_max_iter = 1,
+  control.inla = list(int.strategy = "eb")
+)
+
+
+lik_int <- bru_obs(
+  formula = geometry ~ beta0_int + u + forest_int,
+  family = "cp",
+  data = pa_final,
+  domain = list(geometry = mesh),
+  samplers = boundary_sf
+)
+
+lik_mark <- bru_obs(
+  formula = Presence ~ 
+    beta0_mark +
+    u_copy,
+  family = "binomial",
+  data = pa_final,
+  domain = list(geometry = mesh)
+)
+
+fit <- bru(
+  cmp,
+  lik_int,
+  lik_mark,
+  options = list(
+    control.inla = list(int.strategy = "eb")
+  )
+)
+
+# lik_augmented <- bru_obs(
+#   formula = geometry + Presence ~ beta0 + field_mark + mark_effect + field_int,
+#   family = "cp", 
+#   data = pa_final,
+#   domain = list(
+#     geometry = mesh, 
+#     Presence = c(0, 1)
+#   ),
+#   samplers = boundary_sf
 # )
 
 
 
-###### Modelll #####
-pa_sf <- st_as_sf(pa_final)
-cov_por$forest[is.na(cov_por$forest)] <- 0
-cmp <-  ~ Intercept(1) +
-  field(main = geometry, model = spde)+
-  forest(cov_por$forest)
-
 fit <- bru(
-  cmp,
-  family = "binomial",
-  data = pa_sf,
-  formula = Presence ~ forest + field + Intercept,
-  options = list(
-    control.compute = list(dic = TRUE, waic = TRUE)
-  )
+  cmp,lik_augmented
 )
 summary(fit)
-crs(mesh)
+
 ppxl_out <- fm_pixels(mesh, mask = boundary_sf, format = "sf")
+# ppxl_out <- fm_cprod(ppxl_out, data.frame(Presence = c(0, 1)))
 lambda_out <- predict(
   fit,
   ppxl_out,
   ~ data.frame(
-    lambda = exp(Intercept + field + forest)/(1 + exp(Intercept + field + forest)),
-    w = field
+    lambda_obs =  beta0_int + u + forest_int,
+    marks = exp(beta0_mark +
+                  u_copy)/ (1 + exp(beta0_mark +
+                                      u_copy)) ,
+    w_init = u,
+    w_mark =  u_copy
   )
 )
-summary(lambda_out$lambda)
+summary(lambda_out$lambda_obs)
 
-ggplot(lambda_out$lambda) +
-  geom_sf(aes(fill = mean)) +
-  geom_sf(data = boundary_sf, fill = NA, color = "black") +
-  scale_fill_viridis_c(option = "magma", name = "P(presence)") +
-  labs(
-    title = "Predicted Presence Probability",
-    subtitle = "SPDE logistic model"
+log_int <- ggplot(lambda_out$lambda_obs) +
+  geom_sf(aes(color = mean), size = 2) + 
+  
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.9) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Log-Intensity",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
   ) +
-  theme_minimal()
-
-ggplot(lambda_out$w) +
-  geom_sf(aes(fill = mean))  +
-  scale_fill_viridis_c(option = "magma", name = "P(presence)") +
+  
   labs(
-    title = "Predicted Presence Probability",
-    subtitle = "SPDE logistic model"
+    title = "Log-Intensity"
   ) +
-  theme_minimal()
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
 
-####à# efef  #####
+mark <- ggplot(lambda_out$marks) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "P(presence)",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "Mark Probability"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+mark + log_int
+w_log <- ggplot(lambda_out$w_init) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Mean GP",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "PP GP"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+
+w_mark <- ggplot(lambda_out$w_mark) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Mean GP",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "Mark GP"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+
+combined_plot <- (log_int + mark)/(w_log + w_mark)
+
+combined_plot <- plot_grid(log_int, mark, w_log, w_mark, ncol = 4)
+ggsave(file.path(plot_path, "combined.png"), combined_plot, width = 40, height = 23, dpi = 100, units = "cm", 
+       bg = "white")
+
+
+
+
+####à# Spatial Logistic Regression Code  #####
 spde.pa <- inla.spde2.matern(
   mesh = mesh, alpha = 2)
 # ?inla.spde2.matern

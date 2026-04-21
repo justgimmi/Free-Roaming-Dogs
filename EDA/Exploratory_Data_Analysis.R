@@ -442,8 +442,11 @@ load(file = file.path(Camera_folder, "PA.RData"))
 
 # ggsave(pa_plot, filename = file.path(plot_path, "PA_barplot.jpeg"), dpi = 100, width = 30, height = 25, units = "cm")
 presence_absence_dogs[presence_absence_dogs$POINT_STANDARD == "DARIO_149 _ 04", ]
+summary(presence_absence_dogs$EFFORT)
 
-station_summaries <- presence_absence_dogs %>%
+
+
+station_summaries <- presence_station_summaries <- presence_station_summaries <- presence_absence_dogs %>%
   mutate(
     Year = year(INSTALLATION),
     Npres_num = as.numeric(as.character(Npres))
@@ -555,15 +558,18 @@ cov_env_pres <- ggplot(pa_long_clean, aes(x = Npres, y = Value, fill = Npres)) +
 # ggsave(cov_env_pres, filename = file.path(plot_path, "PA_Niche_Comparison.jpeg"), dpi = 100, width = 30, height = 25, units = "cm")
 
 p_prova <- ggplot() + 
-  geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
-  geom_sf(data = PA_dogs, aes(color = `Dg(P/A)`), size = 1, alpha = 0.6) 
+  geom_spatraster(data = cov_por[["forest"]]) +
+  #geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
+  geom_sf(data = presence_absence_dogs, aes(color = `Dog (P/A)`), size = 1, alpha = 0.6) 
 p_prova
 
+library(mapview)
+mapview(presence_absence_dogs, zcol = "Npres")
 # p_prova2 <- ggplot() + 
 #   geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
 #   geom_sf(data = presence_absence_dogs, aes(color = as.factor(Npres)), size = 1, alpha = 0.6) 
 # p_prova + p_prova2
-
+cov_names_all
 
 p_abs <- ggplot() +
   geom_sf(data = boundary_sf, fill = "grey95", color = "black") +
