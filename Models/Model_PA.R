@@ -8,10 +8,14 @@ source(file.path(utils_path, "Packages.R"))
 load(file.path(data_path, "Boundary_sf.RData"))
 load(file.path(data_path, "Camera Trap/PA.RData"))
 cov_por <- rast(file.path(data_path, "Conteos/covs_updated.tif"))
-boundary_sf <- sf::st_transform(boundary_sf, 32629)
-crs(boundary_sf)
+crs <- "EPSG:3035" 
+proj_string <- "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=km +no_defs"
+fm_transform(boundary_sf, proj_string)
+boundary_sf <- fm_transform(boundary_sf, proj_string)
+# crs_km <- fm_crs(crs, units = "km")
+# cov_por <- terra::crop(cov_por, boundary_sf)
+# cov_por <- terra::mask(cov_por, boundary_sf)
 ####### Let's preprocess the data in a meaningfull way #### 
-
 presence_sites <- presence_absence_dogs %>%
   filter(Npres == 1) %>%
   group_by(POINT_STANDARD) %>%
@@ -25,20 +29,91 @@ absence_sites <- presence_absence_dogs %>%
   mutate(
     Presence = 0)
 
-pa_final <- bind_rows(presence_sites, absence_sites)
-boundary_segm <- fm_segm(boundary_sf)
+pa_final <- bind_rows(presence_sites, absence_sites)|>
+  fm_transform(proj_string)
+
+cov_por <- terra::project(cov_por, proj_string)
+
+# terra::extract(cov_por$forest, vect(pa_final))
+# boundary_segm <- fm_segm(boundary_sf)
+# mesh <- fm_mesh_2d(
+#   boundary = boundary_sf,
+#   max.edge = c(10000, 60000),
+#   cutoff = 5000 ,
+#   offset = c(40000, 100000),
+#   crs = fm_crs(boundary_sf)
+# )
+# 
+# plot(mesh)
+plot(cov_por[[1]])
+plot(st_geometry(boundary_sf), add = TRUE)
+outer_boundary <- fm_nonconvex_hull(boundary_sf, concavity = 40)
 mesh <- fm_mesh_2d(
-  boundary = boundary_sf,
-  max.edge = c(10000, 60000),
-  cutoff = 5000 ,
-  offset = c(40000, 100000),
+  boundary = list(boundary_sf, outer_boundary),
+  max.edge = c(5, 30),
+  cutoff = 5 ,
+  offset = c(15, 20),
   crs = fm_crs(boundary_sf)
 )
-
+fm_crs(mesh)
 plot(mesh)
 
 
+spde_shared <- inla.spde2.pcmatern(
+  mesh = mesh,
+  prior.range = c(30, 0.5),
+  prior.sigma = c(1, 0.5)
+)
+ggplot() + 
+  geom_spatraster(data = cov_por$temp) + 
+  gg(mesh)
+crs(pa_sf)
+pa_sf <- st_as_sf(pa_final)
+crs(pa_sf)
+pa_final$Presence <- as.numeric(pa_final$Npres) - 1
+# table(pa_final$Npres)
+cov_por$forest <- scale(cov_por$forest, center = TRUE, scale = TRUE)
+values(cov_por$forest)
+cov_por$forest[is.na(cov_por$forest)] <- 0
 
+cov_por$hfp <- scale(cov_por$hfp, center = TRUE, scale = TRUE)
+values(cov_por$hfp)
+cov_por$hfp[is.na(cov_por$hfp)] <- 0
+cov_por$prec <- scale(cov_por$prec, center = TRUE, scale = TRUE)
+values(cov_por$prec)
+cov_por$prec[is.na(cov_por$prec)] <- 0
+
+cmp <- geometry  ~ 
+  beta0_int(1) +
+  u(geometry, model = spde_shared) + 
+  forest_int(cov_por$forest, model = "linear")+
+  hfp(cov_por$hfp, model = "linear") + 
+  prec(cov_por$prec, model = "linear")
+
+bru_options_set(
+  bru_verbose = TRUE,
+  verbose = TRUE,
+  bru_max_iter = 1,
+  control.inla = list(int.strategy = "eb")
+)
+
+
+lik_int <- bru_obs(
+  formula = Presence ~ beta0_int + u + forest_int + hfp,
+  family = "binomial",
+  data = pa_final,
+  domain = list(geometry = mesh),
+  samplers = boundary_sf
+)
+
+fit <- bru(
+  cmp,
+  lik_int,
+  options = list(
+    control.inla = list(int.strategy = "eb")
+  )
+)
+summary(fit)
 ###### Marked Point Process #####
 # Starting from the idea that there is a link between where the realizations occurs and the presence/absence nature of the data
 # to mitigate this possible source of bias, we could first of all build a model using the presence only nature of the camera trap
@@ -46,13 +121,13 @@ plot(mesh)
 
 spde_shared <- inla.spde2.pcmatern(
   mesh = mesh,
-  prior.range = c(100000, 0.5),
+  prior.range = c(30, 0.5),
   prior.sigma = c(1, 0.5)
 )
 
 spde_mark <- inla.spde2.pcmatern(
   mesh = mesh,
-  prior.range = c(100000, 0.5),
+  prior.range = c(10, 0.5),
   prior.sigma = c(1, 0.5)
 )
 
@@ -64,13 +139,23 @@ pa_final$Presence <- as.numeric(pa_final$Npres) - 1
 cov_por$forest <- scale(cov_por$forest, center = TRUE, scale = TRUE)
 values(cov_por$forest)
 cov_por$forest[is.na(cov_por$forest)] <- 0
-is.na(values(cov_por$forest))
+
+cov_por$hfp <- scale(cov_por$hfp, center = TRUE, scale = TRUE)
+values(cov_por$hfp)
+cov_por$hfp[is.na(cov_por$hfp)] <- 0
+cov_por$prec <- scale(cov_por$prec, center = TRUE, scale = TRUE)
+values(cov_por$prec)
+cov_por$prec[is.na(cov_por$prec)] <- 0
+
 cmp <- geometry + Presence ~ 
   beta0_int(1) +
   beta0_mark(1) +
   u(geometry, model = spde_shared) + 
   u_copy(geometry, copy = "u", fixed = FALSE)+
-  forest_int(cov_por$forest, model = "linear")
+  v(geometry, model = spde_mark)+
+  forest_int(cov_por$forest, model = "linear")+
+  hfp(cov_por$hfp, model = "linear") + 
+  prec(cov_por$prec, model = "linear")
 
 bru_options_set(
   bru_verbose = TRUE,
@@ -81,7 +166,7 @@ bru_options_set(
 
 
 lik_int <- bru_obs(
-  formula = geometry ~ beta0_int + u + forest_int,
+  formula = geometry ~ beta0_int + u + forest_int + hfp,
   family = "cp",
   data = pa_final,
   domain = list(geometry = mesh),
@@ -90,7 +175,7 @@ lik_int <- bru_obs(
 
 lik_mark <- bru_obs(
   formula = Presence ~ 
-    beta0_mark +
+    beta0_mark  + 
     u_copy,
   family = "binomial",
   data = pa_final,
@@ -119,10 +204,10 @@ fit <- bru(
 
 
 
-fit <- bru(
-  cmp,lik_augmented
-)
-summary(fit)
+# fit <- bru(
+#   cmp,lik_augmented
+# )
+# summary(fit)
 
 ppxl_out <- fm_pixels(mesh, mask = boundary_sf, format = "sf")
 # ppxl_out <- fm_cprod(ppxl_out, data.frame(Presence = c(0, 1)))
@@ -130,9 +215,9 @@ lambda_out <- predict(
   fit,
   ppxl_out,
   ~ data.frame(
-    lambda_obs =  beta0_int + u + forest_int,
+    lambda_obs =  beta0_int + u + forest_int + hfp,
     marks = exp(beta0_mark +
-                  u_copy)/ (1 + exp(beta0_mark +
+                  u_copy )/ (1 + exp(beta0_mark +
                                       u_copy)) ,
     w_init = u,
     w_mark =  u_copy
@@ -250,15 +335,50 @@ w_mark <- ggplot(lambda_out$w_mark) +
     plot.subtitle = element_text(size = 10, color = "grey30")
   )
 
-
+# v_mark <- ggplot(lambda_out$v) +
+#   geom_sf(aes(color = mean), size = 2) + 
+#   geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+#   scale_color_viridis_c(
+#     option = "magma", 
+#     name = "Mean GP",
+#     guide = guide_colorbar(
+#       title.position = "top", 
+#       title.hjust = 0.5, 
+#       barwidth = unit(10, "lines"), 
+#       barheight = unit(0.5, "lines")
+#     )
+#   ) +
+#   
+#   labs(
+#     title = "Mark GP new"
+#   ) +
+#   
+#   annotation_scale(location = "bl", width_hint = 0.2) +
+#   
+#   theme_minimal(base_size = 15) + 
+#   theme(
+#     legend.position = "bottom",
+#     plot.title = element_text(face = "bold", size = 14),
+#     plot.subtitle = element_text(size = 10, color = "grey30"))
 combined_plot <- (log_int + mark)/(w_log + w_mark)
 
 combined_plot <- plot_grid(log_int, mark, w_log, w_mark, ncol = 4)
-ggsave(file.path(plot_path, "combined.png"), combined_plot, width = 40, height = 23, dpi = 100, units = "cm", 
+ggsave(file.path(plot_path, "gp_marked.png"), combined_plot, width = 40, height = 23, dpi = 100, units = "cm", 
        bg = "white")
 
+forest.plot <- plot(fit, "forest_int") +
+  ggtitle("Posterior of Forest Coverage") +
+  theme(legend.position = "bottom")
+print(forest.plot)
 
+hfp.plot <- plot(fit, "hfp") +
+  ggtitle("Posterior of hfp") +
+  theme(legend.position = "bottom")
 
+cov_int_plot <- forest.plot + hfp.plot
+print(hfp.plot)
+ggsave(file.path(plot_path, "cov_PP.png"), cov_int_plot, width = 40, height = 23, dpi = 100, units = "cm", 
+       bg = "white")
 
 ####à# Spatial Logistic Regression Code  #####
 spde.pa <- inla.spde2.matern(
