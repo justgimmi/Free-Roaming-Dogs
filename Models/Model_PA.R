@@ -10,30 +10,51 @@ load(file.path(data_path, "Camera Trap/PA.RData"))
 cov_por <- rast(file.path(data_path, "Conteos/covs_updated.tif"))
 crs <- "EPSG:3035" 
 proj_string <- "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=km +no_defs"
-fm_transform(boundary_sf, proj_string)
 boundary_sf <- fm_transform(boundary_sf, proj_string)
 # crs_km <- fm_crs(crs, units = "km")
-# cov_por <- terra::crop(cov_por, boundary_sf)
-# cov_por <- terra::mask(cov_por, boundary_sf)
+collision_dogs <- read_sf(file.path(data_path, "Database_Dogs&Cats/Collisions_dogs_new.shp"))
+cov_ext <- extend(
+  cov_por,
+  ext(cov_por) + 30000  # attenzione: unità = metri (EPSG:3035)
+)
+
+
 ####### Let's preprocess the data in a meaningfull way #### 
 presence_sites <- presence_absence_dogs %>%
   filter(Npres == 1) %>%
-  group_by(POINT_STANDARD) %>%
+  mutate(years = year(Timestamp))|>
+  group_by(years, POINT_STANDARD) %>%
   slice(1) %>%
   ungroup() %>%
-  mutate(Presence = 1) # as first step we consider just the points with Npres = 1
+  mutate(Presence = 1) |>
+  filter(years %in% c(2019:2023))# as first step we consider just the points with Npres = 1
+
 # we have decided to just consider one if it was overall present there.
 
 absence_sites <- presence_absence_dogs %>%
   filter(Npres == 0) %>% 
-  mutate(
-    Presence = 0)
+  mutate(Presence = 0, years = year(INSTALLATION)) |>
+  group_by(years, POINT_STANDARD) %>%
+  slice(1) %>%
+  ungroup()
 
-pa_final <- bind_rows(presence_sites, absence_sites)|>
-  fm_transform(proj_string)
+table(absence_sites$Presence)
+pa_final <- rbind(presence_sites, absence_sites)
+table(pa_final$Presence, pa_final$years)
+pa_final <- pa_final |>
+  fm_transform(proj_string) |>
+  arrange(years, geometry, desc(Npres)) |>   # priorità a Npres = 1
+  distinct(years, geometry, .keep_all = TRUE)
 
-cov_por <- terra::project(cov_por, proj_string)
-
+table(pa_final$years, pa_final$Presence)
+table(pa_final$Presence, pa_final$years)
+table(pa_final$years)
+# ?project
+cov_ext <- terra::project(cov_ext, proj_string)
+collision_dogs|>
+  fm_transform(proj_string) |>
+  distinct(geometry) -> collisions_sf
+  
 # terra::extract(cov_por$forest, vect(pa_final))
 # boundary_segm <- fm_segm(boundary_sf)
 # mesh <- fm_mesh_2d(
@@ -45,27 +66,27 @@ cov_por <- terra::project(cov_por, proj_string)
 # )
 # 
 # plot(mesh)
-plot(cov_por[[1]])
-plot(st_geometry(boundary_sf), add = TRUE)
-outer_boundary <- fm_nonconvex_hull(boundary_sf, concavity = 40)
+
+# outer_boundary <- fm_nonconvex_hull(boundary_sf, concavity = 30)
+# mesh <- fm_mesh_2d(
+#   boundary = list(boundary_sf, outer_boundary),
+#   max.edge = c(5, 30),
+#   cutoff = 5 ,
+#   offset = c(15, 20),
+#   crs = fm_crs(boundary_sf)
+# )
+
 mesh <- fm_mesh_2d(
-  boundary = list(boundary_sf, outer_boundary),
+  boundary = list(boundary_sf),
   max.edge = c(5, 30),
   cutoff = 5 ,
   offset = c(15, 20),
   crs = fm_crs(boundary_sf)
 )
-fm_crs(mesh)
-plot(mesh)
 
 
-spde_shared <- inla.spde2.pcmatern(
-  mesh = mesh,
-  prior.range = c(30, 0.5),
-  prior.sigma = c(1, 0.5)
-)
 ggplot() + 
-  geom_spatraster(data = cov_por$temp) + 
+  geom_spatraster(data = cov_ext$temp) + 
   gg(mesh)
 crs(pa_sf)
 pa_sf <- st_as_sf(pa_final)
@@ -153,6 +174,7 @@ cmp <- geometry + Presence ~
   u(geometry, model = spde_shared) + 
   u_copy(geometry, copy = "u", fixed = FALSE)+
   v(geometry, model = spde_mark)+
+  v_copy(geometry, copy = "v", fixed = FALSE)+
   forest_int(cov_por$forest, model = "linear")+
   hfp(cov_por$hfp, model = "linear") + 
   prec(cov_por$prec, model = "linear")
@@ -496,4 +518,283 @@ field.grid <- inla.mesh.project(
   model$summary.random$spatial$mean
 )
 length(model$summary.fitted.values$mean)
+
+
+
+
+###### Gelfand Idea ###### 
+
+spde_po <- inla.spde2.pcmatern(
+  mesh = mesh,
+  prior.range = c(20, 0.5),
+  prior.sigma = c(1, 0.05)
+)
+
+spde_pa <- inla.spde2.pcmatern(
+  mesh = mesh,
+  prior.range = c(10, 0.5),
+  prior.sigma = c(1, 0.05)
+)
+# ggplot() + 
+#   geom_spatraster(data = cov_por$temp) + 
+#   gg(mesh)
+
+pa_final$Presence <- as.numeric(pa_final$Npres) - 1
+# table(pa_final$Npres)
+cov_ext$forest <- scale(cov_ext$forest, center = TRUE, scale = TRUE)
+values(cov_ext$forest)
+cov_ext$forest[is.na(cov_ext$forest)] <- 0
+
+cov_ext$hfp <- scale(cov_ext$hfp, center = TRUE, scale = TRUE)
+values(cov_ext$hfp)
+cov_ext$hfp[is.na(cov_ext$hfp)] <- 0
+cov_ext$prec <- scale(cov_ext$prec, center = TRUE, scale = TRUE)
+values(cov_ext$prec)
+cov_ext$prec[is.na(cov_ext$prec)] <- 0
+pa_2022 <- pa_final|>
+  filter(years == 2022)|>
+  distinct(geometry, .keep_all = TRUE)
+
+table(pa_2022$Presence)
+cov_ext$min_dist_to_any_road <- cov_ext$min_dist_to_any_road/1000
+cov_ext$min_dist_to_any_road <- scale(cov_ext$min_dist_to_any_road, center = TRUE, scale = TRUE)
+
+cov_ext$min_dist_to_any_road[is.na(cov_ext$min_dist_to_any_road)] <- 0
+cmp <-  ~ 
+  beta0_po(1) +
+  beta0_pa(1) + 
+  beta0_comm(1)+
+  u(geometry, model = spde_po) + 
+  u_copy(geometry, copy = "u", fixed = FALSE, 
+         hyper = list(beta = list(prior = "normal", param = c(0, 1))))+
+  v(geometry, model = spde_pa) + 
+  v_copy(geometry, copy = "v", fixed = FALSE, 
+         hyper = list(beta = list(prior = "normal", param = c(0, 1))))+
+  forest_po(cov_ext$forest)+
+  forest_pa(cov_ext$forest)+
+  prec(cov_ext$min_dist_to_any_road)
+
+bru_options_set(
+  bru_verbose = TRUE,
+  verbose = TRUE,
+  bru_max_iter = 2
+)
+?bru_obs
+?bru_options_set
+
+lik_int <- bru_obs(
+  formula = Presence ~ beta0_pa + u_copy   ,
+  family = "binomial",
+  data = pa_2022,
+  domain = list(geometry = mesh),
+  samplers = boundary_sf,
+  control.family = list(link = "probit")
+)
+
+lik_pa <- bru_obs(
+  formula = geometry ~ beta0_comm +  v + forest_pa,
+  family = "cp",
+  data = pa_2022,
+  domain = list(geometry = mesh),
+  samplers = boundary_sf
+)
+
+
+lik_po <- bru_obs(
+  formula = geometry ~ beta0_po +  u + prec,
+  family = "cp",
+  data = collisions_sf[1:500, ],
+  domain = list(geometry = mesh),
+  samplers = boundary_sf
+)
+fit <- bru(
+  cmp,lik_po,lik_pa, lik_int
+)
+
+summary(fit)
+
+ppxl_out <- fm_pixels(mesh, mask = boundary_sf, format = "sf")
+# ppxl_out <- fm_cprod(ppxl_out, data.frame(Presence = c(0, 1)))
+lambda_out <- predict(
+  fit,
+  ppxl_out,
+  ~ data.frame(
+    lambda_po =  beta0_po +  u + forest_po,
+    lambda_pa =  beta0_comm +  v + forest_pa,
+    marks = exp(u_copy + v_copy )/ (1 + exp(u_copy + v_copy)) ,
+    w_po = u,
+    w_pa =  v,
+    w_po_copy = u_copy,
+    w_pa_copy = v_copy
+  )
+)
+
+
+summary(fit)
+log_int <- ggplot(lambda_out$lambda_po) +
+  geom_sf(aes(color = mean), size = 2) + 
+  
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.9) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Log-Intensity PO",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "Log-Intensity"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+log_pa <- ggplot(lambda_out$lambda_pa) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Lo-Intensity",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "Log Intensity PA"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+
+marks_prob <- ggplot(lambda_out$marks) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "P(presence)",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "Mark Probability"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+
+log_pa + log_int + marks_prob
+w_pa <- ggplot(lambda_out$w_pa) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Mean GP",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "PP GP"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+
+w_mark <- ggplot(lambda_out$w_pa_copy) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Mean GP",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "Mark GP"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+w_po <- ggplot(lambda_out$w_po) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Mean GP",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "Mark GP"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+w_pa + w_po + w_mark
 

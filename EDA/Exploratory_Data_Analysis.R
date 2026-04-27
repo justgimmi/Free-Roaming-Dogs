@@ -11,7 +11,6 @@ load(boundary_path)
 Conteos_folder <- file.path(data_path, "Conteos") # define conteos folder path
 Camera_folder <- file.path(data_path, "Camera Trap") # define camera folder path
 Database_Folder <- file.path(data_path, "Database_Dogs&Cats") # define Database Folder
-
 ###### old code unuused ####
 # save(boundary_sf, file = file.path(data_path, "Boundary.RData"))
 # boundary_vect <- as.polygons(ext(density_pos), crs = crs(density_pos))
@@ -29,29 +28,29 @@ Database_Folder <- file.path(data_path, "Database_Dogs&Cats") # define Database 
 # hfp <- rast(file.path(Database_Folder, "hfp_2.tif")) # human foot print
 
 # crs(density_por) <- crs
-cov_por <- rast(file.path(Conteos_folder, "covs_updated.tif"))
+cov_por <- rast(file.path(Conteos_folder, "covs_updated_new.tif"))
 crs(cov_por) <- crs
 cov_names_all <- names(cov_por)
 cov_names <- c("temp", "prec", "elev", "urban", "dry", "irrig", "wood", "heter", "agfor", "forest",
-               "mix", "bare", "hfp", "density")
-# sample_pts <- spatSample(cov_por, size = 10000, method = "random", na.rm = TRUE)
+               "mix", "bare", "hfp", "density", "density_km", "min_dist_to_any_road")
+# sample_pts <- spatSample(cov_por[[cov_names]], size = 10000, method = "random", na.rm = TRUE)
 # 
 # cor_matrix <- cor(sample_pts, use = "complete.obs")
 # 
 # plot_file <- file.path(plot_path, "Covariate_Correlation_Matrix.jpeg")
-
+# 
 # jpeg(plot_file, width = 20, height = 20, units = "cm", res = 100)
-# corrplot(cor_matrix, 
-#          method = "ellipse",             
-#          type = "lower",               
-#          order = "hclust", 
+# corrplot(cor_matrix,
+#          method = "ellipse",
+#          type = "lower",
+#          order = "hclust",
 #          addrect = 5,
-#          number.cex = 0.8,            
-#          tl.col = "black", 
-#          tl.srt = 45,                
-#          col = brewer.pal(n = 10, name = "RdBu"), 
-#          diag = FALSE,                
-#          mar = c(0, 0, 1, 0),        
+#          number.cex = 0.8,
+#          tl.col = "black",
+#          tl.srt = 45,
+#          col = brewer.pal(n = 10, name = "RdBu"),
+#          diag = FALSE,
+#          mar = c(0, 0, 1, 0),
 #          title = "Corr Environmental Covariates")
 # 
 # dev.off()
@@ -59,10 +58,10 @@ cov_names <- c("temp", "prec", "elev", "urban", "dry", "irrig", "wood", "heter",
 # names(cov_por)[1:12] <- cov_names
 # cov_por[["hfp"]] <- hfp
 # cov_por[["density"]] <- density_por
-# output_file <- file.path(data_path, "Conteos", "covs_updated_new.tif")
-# writeRaster(cov_por,
-#             filename = output_file,
-#             overwrite=TRUE)
+output_file <- file.path(data_path, "Conteos", "covs_updated_new.tif")
+writeRaster(cov_por,
+            filename = output_file,
+            overwrite=TRUE)
 
 network_por  <- read_sf(file.path(Conteos_folder, "network.shp")) |>
   st_as_sf() |>
@@ -351,7 +350,67 @@ map_bounds <- st_bbox(collision_dogs)
 # 
 # 
 target_classes <- c("motorway", "primary", "residential", "secondary",
-                    "tertiary", "track", "trunk", "unclassified")
+                    "tertiary", "track", "trunk")
+
+
+street_gis <- st_transform(street_gis, crs(cov_por))
+
+street_gis %>%
+  filter(fclass %in% target_classes) -> street_gis_relevant
+grid_polys <- as.polygons(cov_por, dissolve = FALSE) |>
+  st_as_sf()
+grid_polys$id <- 1:nrow(grid_polys)
+st_area(grid_polys)
+road_segments <- st_intersection(street_gis_relevant, grid_polys)
+road_segments$len_m <- as.numeric(st_length(road_segments))
+# road_segments$cell_id <- 1:nrow(road_segments) 
+table(road_segments$id)
+density_data <- road_segments |>
+  group_by(id) |>
+  summarise(total_road_m = sum(len_m, na.rm = TRUE))
+
+density_data_tab <- density_data |>
+  st_drop_geometry()
+
+density_data <- grid_polys |>
+  left_join(density_data_tab, by = "id") |>
+  mutate(
+    total_road_m = replace_na(total_road_m, 0),
+    density_km = (total_road_m/(4*1e6))*1000
+  )
+
+
+
+# density_data$density_km <- (density_data$total_road_m/(4*1e6))*1000
+summary(density_data$density_km)
+density_raster <- rast(cov_por, nlyrs = 1)
+values(density_raster) <- 0
+density_raster <- rasterize(density_data, density_raster, field = "density_km", fun = mean)
+# density_filled <- focal(density_raster, w = 3, fun = mean, NAonly = TRUE)
+# density_filled <- mask(density_filled, boundary_sf)
+# density_final <- cover(density_raster, density_filled)
+
+cov_por$density_km <- density_raster$density_km
+
+p1 <- ggplot() +
+  geom_spatraster(data = cov_por$density_km) +
+  scale_fill_viridis_c(
+    option = "magma", 
+    trans = "sqrt", 
+    na.value = "transparent" 
+  ) +
+  geom_sf(data = boundary_sf, fill = NA, color = "green", linewidth = 0.5)+
+  coord_sf() +
+  labs(
+    title = "Population Density Portugal in 2021",
+    fill = "Density"
+  ) +
+  theme_minimal()
+# names(density_raster) <- "road_density_km_km2"
+p1
+
+ggsave(p1, filename = file.path(plot_path, "road_density.jpeg"), dpi = 100,
+       height = 30, width = 50, units = "cm")
 # 
 # plot_collisions <- collision_dogs %>%
 #   filter(road_class %in% target_classes)
@@ -814,8 +873,8 @@ map <- map %>%
 
 map
 ####### Portugal Boundary #####
-
-# pt.gadm <- gadm(country='Portugal', level=0)
+# 
+# pt.gadm <- st_as_sf(gadm(country='Portugal', level=0))
 # pt.lim = data.frame(ylim=c(36.6, 43), xlim=c(-10, -4.0))
 # pt.bbox <- st_bbox(c(xmin=pt.lim$xlim[1],
 #                      xmax=pt.lim$xlim[2],
@@ -828,12 +887,16 @@ map
 #   xmax=loc.lim$xlim[2],
 #   ymin=loc.lim$ylim[1],
 #   ymax=loc.lim$ylim[2]))
-# pt.gadm <- sf::st_as_sf(pt.gadm) %>% 
-#   st_crop(pt.bbox)
-# boundary_sf
-# pt.gadm |>
+# 
+# 
+# pt.crop <- st_crop(pt.gadm, pt.bbox)
+# pt.clean <- pt.crop |>
+#   st_union() |>
+#   st_make_valid()
+# 
+# # boundary_sf
+# pt.clean |>
 #   st_transform(crs) -> boundary_sf
-#save(boundary_sf, file = file.path(data_path, "Boundary_sf.RData"))
-# ggplot() + 
-#   geom_sf(data = boundary_sf, fill = "grey95", color = "black", linewidth = 0.5) +
-#   geom_sf(data = pt.gadm, color = "red", linewidth = 0.5) 
+# save(boundary_sf, file = file.path(data_path, "Boundary_sf.RData"))
+# ggplot() +
+#   geom_sf(data = pt.clean, fill = "grey95", color = "black", linewidth = 0.5) 
