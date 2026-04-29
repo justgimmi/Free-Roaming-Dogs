@@ -350,10 +350,42 @@ map_bounds <- st_bbox(collision_dogs)
 # 
 # 
 target_classes <- c("motorway", "primary", "residential", "secondary",
-                    "tertiary", "track", "trunk")
+                    "tertiary", "track", "trunk", "unclassified")
 
 
 street_gis <- st_transform(street_gis, crs(cov_por))
+street_gis %>%
+  filter(fclass %in% target_classes) -> street_gis_relevant
+as_Spatial()
+win <- as.owin(c(ext(cov_por)[1:4])) 
+psp_roads <- as.psp(as.psp(street_gis_relevant$geometry), window = win)
+
+px <- pixellate(psp_roads, eps = 2000) # eps=2000 per pixel da 2km
+
+# 4. Converti il risultato in un oggetto raster di terra
+density_raster_final <- rast(px)
+# A questo punto px è un raster di 'lunghezza'. 
+# Se vuoi la densità in km/km² (assumendo pixel 2x2km):
+# Densità = (Lunghezza in metri / 1000) / Area_pixel_km2
+# Con pixel 2km x 2km, l'area è 4 km²
+density_raster_final <- (density_raster_final / 1000) / 4 
+plot(density_raster_final)
+# 5. Assicurati che abbia lo stesso CRS e estensione del tuo cov_por
+crs(density_raster_final) <- crs(cov_por)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 street_gis %>%
   filter(fclass %in% target_classes) -> street_gis_relevant
@@ -361,7 +393,7 @@ grid_polys <- as.polygons(cov_por, dissolve = FALSE) |>
   st_as_sf()
 grid_polys$id <- 1:nrow(grid_polys)
 st_area(grid_polys)
-road_segments <- st_intersection(street_gis_relevant, grid_polys)
+road_segments <- st_intersection(street_gis, grid_polys)
 road_segments$len_m <- as.numeric(st_length(road_segments))
 # road_segments$cell_id <- 1:nrow(road_segments) 
 table(road_segments$id)

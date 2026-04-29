@@ -6,20 +6,34 @@ utils_path <- file.path(path, "Utils")
 plot_path <- file.path(path, "Models/Plot_PA")
 source(file.path(utils_path, "Packages.R"))
 load(file.path(data_path, "Boundary_sf.RData"))
-load(file.path(data_path, "Camera Trap/PA.RData"))
-cov_por <- rast(file.path(data_path, "Conteos/covs_updated.tif"))
+# load(file.path(data_path, "Camera Trap/PA.RData"))
+cov_por <- rast(file.path(data_path, "Conteos/covs_updated_new.tif"))
 crs <- "EPSG:3035" 
-proj_string <- "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=km +no_defs"
-boundary_sf <- fm_transform(boundary_sf, proj_string)
-# crs_km <- fm_crs(crs, units = "km")
-collision_dogs <- read_sf(file.path(data_path, "Database_Dogs&Cats/Collisions_dogs_new.shp"))
+# proj_string <- "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=km +no_defs"
+# crs_km <- fm_crs("EPSG:3035", units = "km")
+crs_km <- fm_crs_set_lengthunit(fm_crs("EPSG:3035"), "km")
+
+boundary_sf <- fm_transform(boundary_sf, crs_km)
+boundary_sf <- boundary_sf |>
+  st_make_valid() |>
+  st_union() |>
+  st_cast("POLYGON")
+
+boundary_sf <- boundary_sf[which.max(st_area(boundary_sf)), ]
+
+boundary_union <- st_union(boundary_sf) 
+boundary_clean <- st_buffer(boundary_union, dist = 0)
+boundary_final <- st_concave_hull(boundary_clean, ratio = 0.0025) 
+
+boundary_sf <- boundary_final
+rm(boundary_final)
 cov_ext <- extend(
   cov_por,
-  ext(cov_por) + 30000  # attenzione: unità = metri (EPSG:3035)
-)
+  ext(cov_por) + 40000)
+cov_ext <- terra::project(cov_ext, crs_km$wkt)
 
-
-####### Let's preprocess the data in a meaningfull way #### 
+####### Let's preprocess the data in a meaningful way #### 
+load(file.path(data_path, "Camera Trap/PA.RData"))
 presence_sites <- presence_absence_dogs %>%
   filter(Npres == 1) %>%
   mutate(years = year(Timestamp))|>
@@ -42,89 +56,77 @@ table(absence_sites$Presence)
 pa_final <- rbind(presence_sites, absence_sites)
 table(pa_final$Presence, pa_final$years)
 pa_final <- pa_final |>
-  fm_transform(proj_string) |>
+  fm_transform(crs_km$wkt) |>
   arrange(years, geometry, desc(Npres)) |>   # priorità a Npres = 1
   distinct(years, geometry, .keep_all = TRUE)
+pa_final$Presence <- as.numeric(pa_final$Npres) - 1
+pa_2022 <- pa_final|>
+  filter(years == 2022)|>
+  distinct(geometry, .keep_all = TRUE)
 
-table(pa_final$years, pa_final$Presence)
-table(pa_final$Presence, pa_final$years)
-table(pa_final$years)
-# ?project
-cov_ext <- terra::project(cov_ext, proj_string)
-collision_dogs|>
-  fm_transform(proj_string) |>
-  distinct(geometry) -> collisions_sf
-  
-# terra::extract(cov_por$forest, vect(pa_final))
-# boundary_segm <- fm_segm(boundary_sf)
-# mesh <- fm_mesh_2d(
-#   boundary = boundary_sf,
-#   max.edge = c(10000, 60000),
-#   cutoff = 5000 ,
-#   offset = c(40000, 100000),
-#   crs = fm_crs(boundary_sf)
-# )
-# 
-# plot(mesh)
+###### Presence absence model ##### 
 
-# outer_boundary <- fm_nonconvex_hull(boundary_sf, concavity = 30)
-# mesh <- fm_mesh_2d(
-#   boundary = list(boundary_sf, outer_boundary),
-#   max.edge = c(5, 30),
-#   cutoff = 5 ,
-#   offset = c(15, 20),
-#   crs = fm_crs(boundary_sf)
-# )
-
+outline <-  st_simplify(st_as_sf(boundary_sf), dTolerance = 3)
 mesh <- fm_mesh_2d(
-  boundary = list(boundary_sf),
-  max.edge = c(5, 30),
-  cutoff = 5 ,
-  offset = c(15, 20),
-  crs = fm_crs(boundary_sf)
+  boundary = list(outline),
+  max.edge = c(5, 25),
+  cutoff = 5,
+  offset = c(10, 20),
+  crs = fm_crs(outline)
+)
+
+spde_pa <- inla.spde2.pcmatern(
+  mesh = mesh,
+  prior.range = c(10, 0.5),
+  prior.sigma = c(1, 0.05)
 )
 
 
-ggplot() + 
-  geom_spatraster(data = cov_ext$temp) + 
-  gg(mesh)
-crs(pa_sf)
-pa_sf <- st_as_sf(pa_final)
-crs(pa_sf)
-pa_final$Presence <- as.numeric(pa_final$Npres) - 1
-# table(pa_final$Npres)
-cov_por$forest <- scale(cov_por$forest, center = TRUE, scale = TRUE)
-values(cov_por$forest)
-cov_por$forest[is.na(cov_por$forest)] <- 0
+cov_scaled <- cov_ext
 
-cov_por$hfp <- scale(cov_por$hfp, center = TRUE, scale = TRUE)
-values(cov_por$hfp)
-cov_por$hfp[is.na(cov_por$hfp)] <- 0
-cov_por$prec <- scale(cov_por$prec, center = TRUE, scale = TRUE)
-values(cov_por$prec)
-cov_por$prec[is.na(cov_por$prec)] <- 0
+forest <- scale(cov_scaled$forest)
+forest[is.na(forest)] <- 0
+forest <-  focal(forest, w=15, fun="mean", 
+                 expand = TRUE, na.rm = T)
 
+
+prec <- scale(cov_scaled$prec)
+prec[is.na(prec)] <- 0
+prec <-  focal(prec, w=15, fun="mean", 
+                 expand = TRUE, na.rm = T)
+
+irrig <- scale(cov_scaled$irrig)
+irrig[is.na(irrig)] <- 0
+irrig <-  focal(irrig, w=15, fun="mean", 
+               expand = TRUE, na.rm = T)
+
+heter <- scale(cov_scaled$heter)
+heter[is.na(heter)] <- 0
+heter <-  focal(heter, w=15, fun="mean", 
+                expand = TRUE, na.rm = T)
+plot(irrig)
 cmp <- geometry  ~ 
-  beta0_int(1) +
-  u(geometry, model = spde_shared) + 
-  forest_int(cov_por$forest, model = "linear")+
-  hfp(cov_por$hfp, model = "linear") + 
-  prec(cov_por$prec, model = "linear")
+  beta0_int(1, model = "linear", prec.linear = 0.01) +
+  u(geometry, model = spde_pa) + 
+  forest_cov(forest, model = "linear")+
+  prec_cov(prec, model = "linear") +
+  irrig_cov(irrig, model = "linear") + 
+  (heter, model = "linear")
 
 bru_options_set(
   bru_verbose = TRUE,
   verbose = TRUE,
-  bru_max_iter = 1,
+  bru_max_iter = 5,
   control.inla = list(int.strategy = "eb")
 )
 
 
 lik_int <- bru_obs(
-  formula = Presence ~ beta0_int + u + forest_int + hfp,
+  formula = Presence ~ beta0_int + u +   prec_cov + log(.data.$EFFORT/365) + heter_cov,
   family = "binomial",
-  data = pa_final,
+  data = pa_2022,
   domain = list(geometry = mesh),
-  samplers = boundary_sf
+  samplers = outline
 )
 
 fit <- bru(
@@ -135,6 +137,105 @@ fit <- bru(
   )
 )
 summary(fit)
+
+
+
+ppxl_out <- fm_pixels(mesh, mask = outline, format = "sf")
+# ppxl_out <- fm_cprod(ppxl_out, data.frame(Presence = c(0, 1)))
+lambda_out <- predict(
+  fit,
+  ppxl_out,
+  ~ data.frame(
+    lambda_po = exp(beta0_int + u +   prec_cov + log(pa_2022$EFFORT/365) + heter_cov)/(1 +exp(beta0_int + u +   prec_cov + log(pa_2022$EFFORT/365) + heter_cov) ), 
+    w_po = u
+  )
+)
+
+
+
+log_int <- ggplot(lambda_out$lambda_po) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.9) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Prob",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "Prob"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+
+w_po <- ggplot(lambda_out$w_po) +
+  geom_sf(aes(color = mean), size = 2) + 
+  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+  scale_color_viridis_c(
+    option = "magma", 
+    name = "Mean GP",
+    guide = guide_colorbar(
+      title.position = "top", 
+      title.hjust = 0.5, 
+      barwidth = unit(10, "lines"), 
+      barheight = unit(0.5, "lines")
+    )
+  ) +
+  
+  labs(
+    title = "PP GP"
+  ) +
+  
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  
+  theme_minimal(base_size = 15) + 
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "grey30")
+  )
+
+
+ggplot() +
+  geom_sf(data = pa_2022, col = "firebrick", size = 0.5) + 
+  geom_sf(data = outline, fill = NA, col = "black", size = 1) -> dat_plot
+heter.plot <- plot(fit, "heter_cov") +
+  ggtitle("Posterior of heter") +
+  theme(legend.position = "bottom")
+
+prec.plot <- plot(fit, "prec_cov") +
+  ggtitle("Posterior of prec") +
+  theme(legend.position = "bottom")
+
+
+cov_int_plot <- log_int + w_po + dat_plot
+ggsave(file.path(plot_path, "Prob.png"), cov_int_plot, width = 40, height = 23, dpi = 100, units = "cm", 
+       bg = "white")
+
+spde.range <- spde.posterior(fit, "u", what = "range")
+spde.logvar <- spde.posterior(fit, "u", what = "log.variance")
+range.plot <- plot(spde.range)
+var.plot <- plot(spde.logvar)
+(range.plot / var.plot)
+cov_int_plot <- prec.plot + heter.plot + range.plot + var.plot
+
+
+ggsave(file.path(plot_path, "pa_other.png"), cov_int_plot, width = 40, height = 23, dpi = 100, units = "cm", 
+       bg = "white")
+
+
 ###### Marked Point Process #####
 # Starting from the idea that there is a link between where the realizations occurs and the presence/absence nature of the data
 # to mitigate this possible source of bias, we could first of all build a model using the presence only nature of the camera trap
