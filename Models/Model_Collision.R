@@ -4,6 +4,7 @@ setwd(path)
 data_path <- file.path(path, "Data")
 utils_path <- file.path(path, "Utils")
 plot_path <- file.path(path, "Models/Plot_PA")
+joint_trials_path <- file.path(path, "Joint_Trials")
 source(file.path(utils_path, "Packages.R"))
 load(file.path(data_path, "Boundary_sf.RData"))
 # load(file.path(data_path, "Camera Trap/PA.RData"))
@@ -59,6 +60,10 @@ collision_dogs |>
   st_filter(boundary_sf, .predicate = st_within)-> collisions_sf
 
 table(collision_dogs$road_class)
+output_file <- file.path(data_path, "COV.tif")
+# writeRaster(cov_ext,
+#             filename = output_file,
+#             overwrite=TRUE)
 # mesh <- fm_mesh_2d(
 #   boundary = list(boundary_sf),
 #   max.edge = c(4, 10),    # 2km interno (risoluzione raster), 6km esterno (bordo)
@@ -114,6 +119,8 @@ pa_2022 <- pa_final|>
   distinct(geometry, .keep_all = TRUE)
 
 ####### Let's first of all build a model that works for the collisions #######
+
+
 outline <-  st_simplify(st_as_sf(boundary_sf), dTolerance = 3)
 mesh <- fm_mesh_2d(
   boundary = list(outline),
@@ -148,10 +155,10 @@ agfor[is.na(agfor)] <- 0
 agfor <-  focal(agfor, w=7, fun="mean", 
                 expand = TRUE, na.rm = T)
 
-plot(forest)
-plot(hfp)
-plot(agfor)
-cor(values(hfp), values(density_km))
+# plot(forest)
+# plot(hfp)
+# plot(agfor)
+# cor(values(hfp), values(density_km))
 density_km <- scale(cov_scaled$density_km)
 density_km[is.na(density_km)] <- 0
 density_km <-  focal(density_km, w=17, fun="mean", 
@@ -166,11 +173,11 @@ min_dist <- focal(min_dist, w=19, fun="mean",
 plot(cov_scaled$min_dist_to_any_road/1000)
 
 
-plot(mesh)
-plot(mesh_bis)
-plot(min_dist)
-plot(hfp)
-plot(density_km)
+# plot(mesh)
+# plot(mesh_bis)
+# plot(min_dist)
+# plot(hfp)
+# plot(density_km)
 
 
 
@@ -702,6 +709,11 @@ plot(agfor)
 
 
 ###### Do not consider mark ##### 
+
+save(boundary_sf, collisions_sf, pa_2022, file = "Cluster.RData")
+
+
+
 outline <-  st_simplify(st_as_sf(boundary_sf), dTolerance = 3)
 mesh <- fm_mesh_2d(
   boundary = list(outline),
@@ -791,7 +803,7 @@ lik_po <- bru_obs(
 
 
 lik_int <- bru_obs(
-  formula = Presence ~ beta0_pa + u_copy + v + forest_cov+ hfp_cov + agfor_cov + prec_cov  ,
+  formula = Presence ~ beta0_pa + u_copy + v + hfp_cov + agfor_cov + prec_cov  + log(.data.$EFFORT/365),
   family = "binomial",
   data = pa_2022,
   domain = list(geometry = mesh),
@@ -803,7 +815,9 @@ fit <- bru(
   cmp,lik_po, lik_int
 )
 summary(fit)
-
+load(file.path(joint_trials_path, "No_cov_fit.RData"))
+load(file.path(joint_trials_path, "No_cov_lambda.RData"))
+summary(fit)
 ppxl_out <- fm_pixels(mesh, mask = boundary_sf, format = "sf")
 # ppxl_out <- fm_cprod(ppxl_out, data.frame(Presence = c(0, 1)))
 lambda_out <- predict(
@@ -811,11 +825,13 @@ lambda_out <- predict(
   ppxl_out,
   ~ data.frame(
     lambda_po = beta0_po + u  + hfp_cov + agfor_cov + heter_cov,
-    lambda_pa = beta0_pa + u_copy + v + forest_cov+ hfp_cov + agfor_cov + prec_cov,
+    lambda_pa = beta0_pa + u_copy + v + hfp_cov + agfor_cov + prec_cov,
     w_po = u,
     w_pa = v, 
     w_copy  = u_copy )
   )
+
+
 
 
 log_int <- ggplot(lambda_out$lambda_po) +
@@ -845,7 +861,6 @@ log_int <- ggplot(lambda_out$lambda_po) +
   )
 
 
-lambda_out$lambda_pa$mean <- log(lambda_out$lambda_pa$mean)
 log_int_bis <- ggplot(lambda_out$lambda_pa) +
   geom_sf(aes(color = mean), size = 2) + 
   geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.9) +
@@ -875,7 +890,6 @@ log_int_bis <- ggplot(lambda_out$lambda_pa) +
 
 log_int + log_int_bis
 
-summary(fit)
 
 w_po <- ggplot(lambda_out$w_po) +
   geom_sf(aes(color = mean), size = 2) + 
@@ -961,8 +975,9 @@ w_pa_copy <- ggplot(lambda_out$w_copy) +
 
 w_po + w_pa + w_pa_copy
 log_int + w_po
-
-save(fit, file = "Jafet_Idea.RData")
+log_int_bis + w_pa + w_pa_copy
+summary(fit)
+#save(fit, file = "Jafet_Idea.RData")
 ggplot() +
   geom_sf(data = collisions_sf, col = "firebrick", size = 0.1) + 
   geom_sf(data = outline, fill = NA, col = "black", size = 1) -> dat_plot_collisions
@@ -975,15 +990,29 @@ agp.plot <- plot(fit, "agfor_cov") +
   ggtitle("Posterior of agfor_cov PO") +
   theme(legend.position = "bottom")
 
-forest_cov.plot <- plot(fit, "forest_cov") +
-  ggtitle("Posterior of forest_cov PO") +
+heter.plot <- plot(fit, "heter_cov") +
+  ggtitle("Posterior of heter_cov PO") +
   theme(legend.position = "bottom")
 
+prec.plot <- plot(fit, "prec_cov") +
+  ggtitle("Posterior of prec_cov PO") +
+  theme(legend.position = "bottom")
 
 spde.range <- spde.posterior(fit, "u", what = "range")
 spde.logvar <- spde.posterior(fit, "u", what = "log.variance")
 range.plot <- plot(spde.range)
 var.plot <- plot(spde.logvar)
+
+
+
+spde.range_v <- spde.posterior(fit, "v", what = "range")
+spde.logvar_v <- spde.posterior(fit, "v", what = "log.variance")
+range.plot_v <- plot(spde.range_v)
+var.plot_v <- plot(spde.logvar_v)
+
+
+
+
 
 presence_only <- (log_int |w_po |dat_plot_collisions |range.plot|var.plot)/
   (hfp.plot|agp.plot|forest_cov.plot)+ 
@@ -1000,6 +1029,19 @@ ggsave(file.path(plot_path, "Collisions_big_model.png"), presence_only, width = 
 ggplot() +
   geom_sf(data = pa_2022, aes(col = Npres), size = 1.1) + 
   geom_sf(data = outline, fill = NA, col = "black", size = 1) -> dat_plot_presence
+
+w_po + w_pa + dat_plot_presence
+
+plot_no_cov <- (w_po | w_pa|dat_plot_presence)/
+  (log_int|log_int_bis|dat_plot_collisions)+ 
+  plot_layout(guides = "collect") &
+  theme(
+    plot.title = element_blank(),
+    plot.margin = margin(0, 0, 0, 0),
+    legend.margin = margin(0, 0, 0, 0)
+  )
+
+
 layout <- "
 AB
 CD
