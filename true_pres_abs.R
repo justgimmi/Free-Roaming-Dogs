@@ -565,12 +565,30 @@ trues_cov_df |>
   mutate(par = "beta1",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
          coverage = ifelse(q25<=beta_f[2]& q975>=beta_f[2],1,0)) -> trues_cov_df
 
+trues_sigma_df <- rbind(do.call("rbind",MSE_sigma))
+colnames(trues_sigma_df)[1] <- "values"
+trues_sigma_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_sigma_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "sigma",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=sigma_spde& q975>=sigma_spde,1,0)) -> trues_sigma_df
+
+trues_range_df <- rbind(do.call("rbind",MSE_range))
+colnames(trues_range_df)[1] <- "values"
+trues_range_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_range_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "range",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=range_spde& q975>=range_spde,1,0)) -> trues_range_df
 
 
+param_df <- rbind(trues_cov_df, trues_int_abs_df, trues_prs_abs_df, trues_sigma_df,
+                  trues_range_df)
 
-param_df <- rbind(trues_cov_df, trues_int_abs_df, trues_prs_abs_df)
-
-levels(param_df$par) <- c(expression(beta[1]), expression(beta[0]^PA),expression(beta[0]^PO))
+levels(param_df$par) <- c(expression(beta[1]), expression(beta[0]^PA),expression(beta[0]^PO),
+                          expression(sigma^SPDE), expression(rho^SPDE))
 
 
 #save(trues_prs_abs_df,file="trues_prs_abs_results.RData")
@@ -593,9 +611,23 @@ p3 <- param_df %>%
   labs(x="Sampling scheme",y=expression(Var~(beta))) + 
   theme(legend.position = 0, text=element_text(family="serif", size=20))
 
-p1+p2+p3+patchwork::plot_layout(ncol=1)
 
-ggsave(filename = "true_pres_abs_sim_all.pdf",dpi = 300,height = 4000,width = 3000,units = "px")
+true_value <- c(beta_f[2], beta_f[1], beta_f[1], sigma_spde, range_spde)
+param_df$true_value <- rep(true_value, each = 100)
+p_valori <- param_df %>%
+  ggplot(aes(y = Mean)) +
+  geom_boxplot(fill = "skyblue", outlier.color = "red", alpha = 0.7) +
+  facet_wrap(~par, labeller = label_parsed,scales = "free") +
+  geom_hline(aes(yintercept = true_value), color = "red", linetype = "dashed", size = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif", size = 16),
+    strip.text = element_text(size = 18, face = "bold")
+  )
+
+#p1+p2+p3+patchwork::plot_layout(ncol=1)
+
+#ggsave(filename = "true_pres_abs_sim_all.pdf",dpi = 300,height = 4000,width = 3000,units = "px")
 
 param_df|>
   group_by(par)|>
@@ -606,4 +638,44 @@ param_df|>
 #   geom_boxplot() + facet_grid(Metric~par,labeller = label_parsed ,scales = "free") +
 #   labs(x="Sampling scheme",y=expression(Bias~(beta))) + 
 #   theme(legend.position = 0, text=element_text(family="serif", size=20))
+int_df <- rbind(do.call("rbind",MAE_intensity))
+colnames(int_df)[1] <- "values"
+int_df$id <- rep(c("MAE", "q25", "q975"), 100) 
+int_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "Intensity",par =as.factor(par), mod = "IDM", mod = as.factor(mod)) -> int_df
+gp_df <- rbind(do.call("rbind",MAE_GP))
+colnames(gp_df)[1] <- "values"
+gp_df$id <- rep(c("MAE", "q25", "q975"), 100) 
+gp_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "GP",par =as.factor(par), mod = "IDM", mod = as.factor(mod)) -> gp_df
 
+MAE_pred <- rbind(int_df, gp_df)
+
+p4 <- MAE_pred %>%
+  ggplot(aes(x=as.factor(data),y=(MAE))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="Sampling scheme",y=expression(MAE)) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+
+p_mae <- MAE_pred %>%
+  ggplot(aes(y = MAE)) +
+  geom_boxplot(fill = "skyblue", outlier.color = "red", alpha = 0.7) +
+  facet_wrap(~par, labeller = label_parsed,scales = "free") +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif", size = 16),
+    strip.text = element_text(size = 18, face = "bold")
+  )
+
+
+pdf(file = "IDM.pdf", width = 10, height = 8)
+p1
+p2
+p3
+p4
+p_valori
+p_mae
+dev.off()
