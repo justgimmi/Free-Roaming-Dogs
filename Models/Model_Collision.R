@@ -710,7 +710,7 @@ plot(agfor)
 
 ###### Do not consider mark ##### 
 
-save(boundary_sf, collisions_sf, pa_2022, file = "Cluster.RData")
+# save(boundary_sf, collisions_sf, pa_2022, file = "Cluster.RData")
 
 
 
@@ -739,37 +739,71 @@ spde_co <- inla.spde2.pcmatern(
 cov_scaled <- cov_ext
 hfp <- scale(cov_scaled$hfp)
 hfp[is.na(hfp)] <- 0
-hfp <-  focal(hfp, w=13, fun="mean", 
+hfp <-  focal(hfp, w=7, fun="mean", 
               expand = TRUE, na.rm = T)
 
 
 forest <- scale(cov_scaled$forest)
 forest[is.na(forest)] <- 0
-forest <-  focal(forest, w=13, fun="mean", 
+forest <-  focal(forest, w=7, fun="mean", 
                  expand = TRUE, na.rm = T)
 
 agfor <- scale(cov_scaled$agfor)
 agfor[is.na(agfor)] <- 0
-agfor <-  focal(agfor, w=13, fun="mean", 
+agfor <-  focal(agfor, w=7, fun="mean", 
                 expand = TRUE, na.rm = T)
 
 heter <- scale(cov_scaled$heter)
 heter[is.na(heter)] <- 0
-heter <-  focal(heter, w=13, fun="mean", 
+heter <-  focal(heter, w=7, fun="mean", 
                 expand = TRUE, na.rm = T)
 
 prec <- scale(cov_scaled$prec)
 prec[is.na(prec)] <- 0
-prec <-  focal(prec, w=13, fun="mean", 
+prec <-  focal(prec, w=7, fun="mean", 
                 expand = TRUE, na.rm = T)
 
-plot(cov_scaled$mix)
+dry <- scale(cov_scaled$dry)
+dry[is.na(dry)] <- 0
+dry <-  focal(dry, w=7, fun="mean", 
+               expand = TRUE, na.rm = T)
 
+wood <- scale(cov_scaled$wood)
+wood[is.na(wood)] <- 0
+wood <-  focal(wood, w=7, fun="mean", 
+              expand = TRUE, na.rm = T)
+
+mix <- scale(cov_scaled$mix)
+mix[is.na(mix)] <- 0
+mix <-  focal(mix, w=7, fun="mean", 
+               expand = TRUE, na.rm = T)
+
+density <- scale(cov_scaled$density_km)
+density[is.na(density)] <- 0
+density <-  focal(density, w=7, fun="mean", 
+              expand = TRUE, na.rm = T)
+
+bare <- scale(cov_scaled$bare)
+bare[is.na(bare)] <- 0
+bare <-  focal(bare, w=7, fun="mean", 
+                  expand = TRUE, na.rm = T)
+
+plot(bare)
+plot(density)
+plot(mix)
+plot(cov_scaled$mix)
+plot(dry)
 plot(forest)
 plot(hfp)
 plot(agfor)
 plot(heter)
 plot(prec)
+plot(wood)
+
+ggplot() +
+  geom_spatraster(data = mix) +
+  geom_sf(data = pa_2022, aes(col = Npres), size = 2) + 
+  geom_sf(data = outline, fill = NA, col = "black", size = 1)
 
 
 
@@ -896,7 +930,7 @@ w_po <- ggplot(lambda_out$w_po) +
   geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
   scale_color_viridis_c(
     option = "magma", 
-    name = "Mean GP Presence Only",
+    name = "Mean GP Common Field",
     guide = guide_colorbar(
       title.position = "top", 
       title.hjust = 0.5, 
@@ -923,7 +957,7 @@ w_pa <- ggplot(lambda_out$w_pa) +
   geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
   scale_color_viridis_c(
     option = "magma", 
-    name = "Mean GP Presence Absence",
+    name = "Mean GP Presence Only",
     guide = guide_colorbar(
       title.position = "top", 
       title.hjust = 0.5, 
@@ -945,58 +979,58 @@ w_pa <- ggplot(lambda_out$w_pa) +
     plot.subtitle = element_text(size = 10, color = "grey30")
   )
 w_po + w_pa
-w_pa_copy <- ggplot(lambda_out$w_copy) +
-  geom_sf(aes(color = mean), size = 2) + 
-  geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
-  scale_color_viridis_c(
-    option = "magma", 
-    name = "Mean GP Presence Absence Copy",
-    guide = guide_colorbar(
-      title.position = "top", 
-      title.hjust = 0.5, 
-      barwidth = unit(10, "lines"), 
-      barheight = unit(0.5, "lines")
-    )
-  ) +
-  
-  labs(
-    title = "PP GP"
-  ) +
-  
-  annotation_scale(location = "bl", width_hint = 0.2) +
-  
-  theme_minimal(base_size = 15) + 
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 10, color = "grey30")
-  )
+# w_pa_copy <- ggplot(lambda_out$w_copy) +
+#   geom_sf(aes(color = mean), size = 2) + 
+#   geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.5) +
+#   scale_color_viridis_c(
+#     option = "magma", 
+#     name = "Mean GP Presence Absence Copy",
+#     guide = guide_colorbar(
+#       title.position = "top", 
+#       title.hjust = 0.5, 
+#       barwidth = unit(10, "lines"), 
+#       barheight = unit(0.5, "lines")
+#     )
+#   ) +
+#   
+#   labs(
+#     title = "PP GP"
+#   ) +
+#   
+#   annotation_scale(location = "bl", width_hint = 0.2) +
+#   
+#   theme_minimal(base_size = 15) + 
+#   theme(
+#     legend.position = "bottom",
+#     plot.title = element_text(face = "bold", size = 14),
+#     plot.subtitle = element_text(size = 10, color = "grey30")
+#   )
 
 
-w_po + w_pa + w_pa_copy
+w_po + w_pa 
 log_int + w_po
-log_int_bis + w_pa + w_pa_copy
+log_int + log_int_bis + w_pa + w_po
 summary(fit)
 #save(fit, file = "Jafet_Idea.RData")
 ggplot() +
   geom_sf(data = collisions_sf, col = "firebrick", size = 0.1) + 
   geom_sf(data = outline, fill = NA, col = "black", size = 1) -> dat_plot_collisions
 
-hfp.plot <- plot(fit, "hfp_cov") +
-  ggtitle("Posterior of hfp PO") +
-  theme(legend.position = "bottom")
-
-agp.plot <- plot(fit, "agfor_cov") +
-  ggtitle("Posterior of agfor_cov PO") +
-  theme(legend.position = "bottom")
-
-heter.plot <- plot(fit, "heter_cov") +
-  ggtitle("Posterior of heter_cov PO") +
-  theme(legend.position = "bottom")
-
-prec.plot <- plot(fit, "prec_cov") +
-  ggtitle("Posterior of prec_cov PO") +
-  theme(legend.position = "bottom")
+# hfp.plot <- plot(fit, "hfp_cov") +
+#   ggtitle("Posterior of hfp PO") +
+#   theme(legend.position = "bottom")
+# 
+# agp.plot <- plot(fit, "agfor_cov") +
+#   ggtitle("Posterior of agfor_cov PO") +
+#   theme(legend.position = "bottom")
+# 
+# heter.plot <- plot(fit, "heter_cov") +
+#   ggtitle("Posterior of heter_cov PO") +
+#   theme(legend.position = "bottom")
+# 
+# prec.plot <- plot(fit, "prec_cov") +
+#   ggtitle("Posterior of prec_cov PO") +
+#   theme(legend.position = "bottom")
 
 spde.range <- spde.posterior(fit, "u", what = "range")
 spde.logvar <- spde.posterior(fit, "u", what = "log.variance")
@@ -1011,11 +1045,14 @@ range.plot_v <- plot(spde.range_v)
 var.plot_v <- plot(spde.logvar_v)
 
 
+ggplot() +
+  geom_sf(data = pa_2022, aes(col = Npres), size = 2) + 
+  geom_sf(data = outline, fill = NA, col = "black", size = 1) -> pa
 
 
 
-presence_only <- (log_int |w_po |dat_plot_collisions |range.plot|var.plot)/
-  (hfp.plot|agp.plot|forest_cov.plot)+ 
+presence_only <- (log_int |w_po |dat_plot_collisions)/
+  (log_int_bis|w_pa|pa)+ 
   plot_layout(guides = "collect") &
   theme(
     plot.title = element_blank(),
@@ -1023,12 +1060,12 @@ presence_only <- (log_int |w_po |dat_plot_collisions |range.plot|var.plot)/
     legend.margin = margin(0, 0, 0, 0)
   )
 
-ggsave(file.path(plot_path, "Collisions_big_model.png"), presence_only, width = 40, height = 23, dpi = 100, units = "cm", 
+ggsave(file.path(plot_path, "No_cov_model.png"), presence_only, width = 40, height = 23, dpi = 100, units = "cm", 
        bg = "white")
-
-ggplot() +
-  geom_sf(data = pa_2022, aes(col = Npres), size = 1.1) + 
-  geom_sf(data = outline, fill = NA, col = "black", size = 1) -> dat_plot_presence
+dat_plot_presence <- ggplot() +
+  geom_spatraster(data = agfor) +
+  geom_sf(data = pa_2022, aes(col = Npres), size = 2) + 
+  geom_sf(data = outline, fill = NA, col = "black", size = 1)
 
 w_po + w_pa + dat_plot_presence
 
