@@ -16,7 +16,7 @@
 # - the second realization will be transformed into presence absence using a {0, 1} covariate and the GF
 # instead of actually defiune a covariate, what we can do is to consider a sort of latent effect in the sense
 # that only I will sample points only in super high value areas of the GP
-load("results_simulation.RData")
+
 # load libraries ----------------------------------------------------------
 library(ggplot2)
 library(tidyverse)
@@ -33,9 +33,10 @@ library(tidyterra)
 library(stars)
 library(purrr)
 library(ggthemes)
+library(grid)
 library(gridExtra)
 library(viridis)
-
+# setwd("C:/Users/gmsan/Documents/GitHub/Street_Dog_Cats/Sim/")
 # Define spatial domain
 
 save(boundary_sf, sim_field_true, sim_field3_X, pp_set_0, po_sf, po_sf_new, Biased_Sampling_10cellID,
@@ -250,6 +251,7 @@ BS = delta_s_PA
 BS[BS < quantile(BS, probs = c(0.85))] = 0
 BS[BS >=  quantile(BS, probs = c(0.85))] =  exp( BS[BS >=  quantile(BS, probs = c(0.85))] )/sum(exp(BS[BS >=  quantile(BS, probs = c(0.85))]))
 sum(BS)
+BS
 #scale_values <- function(x){(x-min(x))/(max(x)-min(x))}
 #BS = scale_values(BS)
 plot(lambda_im_plot$delta_s_PA)
@@ -311,6 +313,7 @@ True_Pres_all <-  do.call("rbind",True_Pres_lst) # store cell presences-absence
 
 
 # check matching is done correctly: 
+n_data = 100
 flag <- 46
 customGrid$tst <- Biased_Sampling_10cellID[,flag] #Biased_Sampling_10cellID[,flag]
 ggplot()+
@@ -327,8 +330,118 @@ rm(flag)
 nrow(True_Pres_all[True_Pres_all$sim == 1,])
 po_sf[po_sf$sim == 1 & po_sf$det1 == 1, ]
 
+# Plot -----------------
 
+x_rast_both = rast(data.frame(x = xy[,1], y = xy[,2],x_s))
+# g_rast = rast(data.frame(x = xy[,1], y = xy[,2],sampling_bias$s))
+x_rast_PA = rast(data.frame(x = xy[,1], y = xy[,2],delta_s_PA))
+x_rast_PO =rast(data.frame(x = xy[,1], y = xy[,2],sampling_bias$s))
 
+# n_data = 100
+
+pdf(file = "Simulation_Spatial_Plots.pdf", width = 11, height = 8.5)
+
+# ---------------------------------------------------------
+# Section 1: Baseline Rasters
+# ---------------------------------------------------------
+# Using tidyterra's geom_spatraster() makes raw rasters look incredible in ggplot
+# If you are using base terra/raster objects, we wrap them cleanly here.
+
+raster_list <- list(
+  "PA Covariate proxy" = x_rast_PA, 
+  "PO Covariate proxy" = x_rast_PO, 
+  "Spatial Latent Effect (Omega)" = omega_rast, 
+  "Combined Effects" = x_rast_both, 
+  "Sampling PA Surface" = bs_rast
+)
+
+cat("Rendering baseline rasters...\n")
+for (name in names(raster_list)) {
+  p_rast <- ggplot() +
+    geom_spatraster(data = raster_list[[name]]) +
+    scale_fill_viridis_c(option = "viridis", na.value = "transparent") +
+    labs(title = paste("Baseline Field:", name), fill = "Value") +
+    theme_minimal(base_family = "serif") +
+    theme(
+      plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+      panel.grid = element_line(color = "grey90")
+    )
+  print(p_rast)
+}
+
+# ---------------------------------------------------------
+# Section 2: Simulation Loop (1 to 100)
+# ---------------------------------------------------------
+cat("Rendering simulation pages...\n")
+
+for (i in 1:100) {
+  
+  # --- Plot A: Detection / Observation thinning map ---
+  sim_po_data <- po_sf_new[po_sf_new$sim == i, ]
+  
+  p_detection <- ggplot() +
+    geom_sf(data = boundary_sf, fill = "grey98", color = "black", linewidth = 0.6) +
+    geom_sf(data = sim_po_data, aes(col = as.factor(det1)), size = 1.5, alpha = 0.8) +
+    scale_color_brewer(palette = "Set1") +
+    labs(
+      title = paste("Simulation", i, "- Presence-Only Detection State"),
+      color = "Detected (det1)"
+    ) +
+    theme_minimal(base_family = "serif") +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      legend.position = "bottom"
+    )
+  
+  print(p_detection) # CRITICAL: Prints inside the loop to the PDF
+  
+  
+  # --- Plot B: Biased Sampling Grid & Truth Point Pattern ---
+  # Safely inject the flag matrix column
+  customGrid$tst <- Biased_Sampling_10cellID[, i]
+  
+  # Filter point datasets for this specific iteration
+  sim_pp_set <- pp_set_0 %>% 
+    filter(sim == (i + n_data)) %>% 
+    select(x, y) %>% 
+    st_as_sf(coords = c("x", "y"), crs = st_crs(customGrid))
+  
+  sim_true_pres <- True_Pres_all %>% 
+    filter(sim == i & scheme == "BS") %>% 
+    st_as_sf(coords = c("X", "Y"), crs = st_crs(customGrid))
+  
+  p_grid <- ggplot() +
+    # Background Cell Bias Weights
+    geom_sf(data = customGrid, aes(fill = factor(tst)), color = "white", linewidth = 0.1, alpha = 0.6) +
+    scale_fill_viridis_d(option = "mako", name = "Sampling Bias Level") +
+    
+    # Study Area Boundary
+    geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.7) +
+    
+    # True Presence Underlying Status
+    geom_sf(data = sim_true_pres, aes(color = factor(pres)), size = 2, alpha = 0.8) +
+    scale_color_manual(values = c("0" = "#ee6c4d", "1" = "#3d5a80"), name = "True Presence Status") +
+    
+    # Overlaid Survey Locations (Purple Triangles)
+    geom_sf(data = sim_pp_set, color = "purple", shape = 17, size = 2.5) +
+    
+    labs(
+      title = paste("Simulation", i, "- Biased Sampling Scheme & Process State"),
+      subtitle = "Purple triangles represent sampling locations"
+    ) +
+    theme_minimal(base_family = "serif") +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 11, face = "italic", color = "grey30"),
+      legend.position = "right"
+    )
+  
+  print(p_grid) # CRITICAL: Prints inside the loop to the PDF
+}
+
+# Close and write the PDF
+dev.off()
+cat("Finished! PDF saved safely as 'Simulation_Spatial_Plots.pdf'\n")
 # Analysis  ---------------------------------------------------------------
 
 x_rast_both = rast(data.frame(x = xy[,1], y = xy[,2],x_s))
@@ -532,8 +645,11 @@ for( j in 1:100){
   }
 
 
-save(MSE_beta0, MSE_beta1, MSE_intercept,MSE_range, MSE_sigma, MAE_intensity, MAE_GP,fit_pred,
-     file = "results_simulation.RData")
+# save(MSE_beta0, MSE_beta1, MSE_intercept,MSE_range, MSE_sigma, MAE_intensity, MAE_GP,fit_pred,
+#      file = "results_simulation.RData")
+
+### IDM ####
+load("results_simulation.RData")
 
 beta_f <- c(-5.5,1)
 range_spde = 100
@@ -670,7 +786,11 @@ p_mae <- MAE_pred %>%
     strip.text = element_text(size = 18, face = "bold")
   )
 
+coverage_summary <- param_df %>%
+  group_by(par) %>%
+  summarise(mean_coverage = mean(coverage))
 
+print(coverage_summary)
 pdf(file = "IDM.pdf", width = 10, height = 8)
 p1
 p2
@@ -678,4 +798,300 @@ p3
 p4
 p_valori
 p_mae
+grid.newpage()
+grid.table(coverage_summary)
+dev.off()
+
+
+###### PA  ##########
+
+load("results_simulation_PA.RData")
+
+beta_f <- c(-5.5,1)
+range_spde = 100
+sigma_spde = 1
+
+trues_int_abs_df <- rbind(do.call("rbind",MSE_intercept))
+colnames(trues_int_abs_df)[1] <- "values"
+trues_int_abs_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_int_abs_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "beta0_PA",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=beta_f[1]& q975>=beta_f[1],1,0)) -> trues_int_abs_df
+
+trues_cov_df <- rbind(do.call("rbind",MSE_beta1))
+colnames(trues_cov_df)[1] <- "values"
+trues_cov_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_cov_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "beta1",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=beta_f[2]& q975>=beta_f[2],1,0)) -> trues_cov_df
+
+trues_sigma_df <- rbind(do.call("rbind",MSE_sigma))
+colnames(trues_sigma_df)[1] <- "values"
+trues_sigma_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_sigma_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "sigma",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=sigma_spde& q975>=sigma_spde,1,0)) -> trues_sigma_df
+
+trues_range_df <- rbind(do.call("rbind",MSE_range))
+colnames(trues_range_df)[1] <- "values"
+trues_range_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_range_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "range",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=range_spde& q975>=range_spde,1,0)) -> trues_range_df
+
+
+param_df <- rbind(trues_cov_df, trues_int_abs_df, trues_sigma_df,
+                  trues_range_df)
+
+levels(param_df$par) <- c(expression(beta[1]), expression(beta[0]^PA),
+                          expression(sigma^SPDE), expression(rho^SPDE))
+
+
+#save(trues_prs_abs_df,file="trues_prs_abs_results.RData")
+
+p1 <- param_df %>%
+  ggplot(aes(x=as.factor(data),y=(MSE))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="",y=expression(MSE~(beta))) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+p2 <- param_df %>%
+  ggplot(aes(x=as.factor(data),y=(bias))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="",y=expression(Bias~(beta))) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+p3 <- param_df %>%
+  ggplot(aes(x=as.factor(data),y=(var))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="Sampling scheme",y=expression(Var~(beta))) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+
+true_value <- c(beta_f[2], beta_f[1], sigma_spde, range_spde)
+param_df$true_value <- rep(true_value, each = 100)
+p_valori <- param_df %>%
+  ggplot(aes(y = Mean)) +
+  geom_boxplot(fill = "skyblue", outlier.color = "red", alpha = 0.7) +
+  facet_wrap(~par, labeller = label_parsed,scales = "free") +
+  geom_hline(aes(yintercept = true_value), color = "red", linetype = "dashed", size = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif", size = 16),
+    strip.text = element_text(size = 18, face = "bold")
+  )
+
+#p1+p2+p3+patchwork::plot_layout(ncol=1)
+
+#ggsave(filename = "true_pres_abs_sim_all.pdf",dpi = 300,height = 4000,width = 3000,units = "px")
+
+param_df|>
+  group_by(par)|>
+  summarise(mean(coverage))
+# param_df %>% 
+#   pivot_longer(cols = c(MSE,bias,var),names_to = "Metric") %>% filter(Metric %in% c("bias","var")) %>%
+#   ggplot(aes(x=as.factor(data),y=(value))) +
+#   geom_boxplot() + facet_grid(Metric~par,labeller = label_parsed ,scales = "free") +
+#   labs(x="Sampling scheme",y=expression(Bias~(beta))) + 
+#   theme(legend.position = 0, text=element_text(family="serif", size=20))
+int_df <- rbind(do.call("rbind",MAE_intensity))
+colnames(int_df)[1] <- "values"
+int_df$id <- rep(c("MAE", "q25", "q975"), 100) 
+int_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "Intensity",par =as.factor(par), mod = "IDM", mod = as.factor(mod)) -> int_df
+gp_df <- rbind(do.call("rbind",MAE_GP))
+colnames(gp_df)[1] <- "values"
+gp_df$id <- rep(c("MAE", "q25", "q975"), 100) 
+gp_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "GP",par =as.factor(par), mod = "IDM", mod = as.factor(mod)) -> gp_df
+
+MAE_pred <- rbind(int_df, gp_df)
+
+p4 <- MAE_pred %>%
+  ggplot(aes(x=as.factor(data),y=(MAE))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="Sampling scheme",y=expression(MAE)) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+
+p_mae <- MAE_pred %>%
+  ggplot(aes(y = MAE)) +
+  geom_boxplot(fill = "skyblue", outlier.color = "red", alpha = 0.7) +
+  facet_wrap(~par, labeller = label_parsed,scales = "free") +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif", size = 16),
+    strip.text = element_text(size = 18, face = "bold")
+  )
+coverage_summary <- param_df %>%
+  group_by(par) %>%
+  summarise(mean_coverage = mean(coverage))
+
+print(coverage_summary)
+
+pdf(file = "PA.pdf", width = 10, height = 8)
+p1
+p2
+p3
+p4
+p_valori
+p_mae
+grid.newpage()
+grid.table(coverage_summary)
+dev.off()  
+#### Po ####
+load("results_simulation_PO.RData")
+
+beta_f <- c(-5.5,1)
+range_spde = 100
+sigma_spde = 1
+trues_prs_abs_df <- rbind(do.call("rbind",MSE_beta0))
+colnames(trues_prs_abs_df)[1] <- "values"
+trues_prs_abs_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+trues_prs_abs_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "beta0_PO",par =as.factor(par), mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=beta_f[1]& q975>=beta_f[1],1,0)) -> trues_prs_abs_df
+
+
+trues_cov_df <- rbind(do.call("rbind",MSE_beta1))
+colnames(trues_cov_df)[1] <- "values"
+trues_cov_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_cov_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "beta1",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=beta_f[2]& q975>=beta_f[2],1,0)) -> trues_cov_df
+
+trues_sigma_df <- rbind(do.call("rbind",MSE_sigma))
+colnames(trues_sigma_df)[1] <- "values"
+trues_sigma_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_sigma_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "sigma",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=sigma_spde& q975>=sigma_spde,1,0)) -> trues_sigma_df
+
+trues_range_df <- rbind(do.call("rbind",MSE_range))
+colnames(trues_range_df)[1] <- "values"
+trues_range_df$id <- rep(c("MSE", "Mean", "q25", "q975", "bias", "var"), 100) 
+
+trues_range_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "range",par =as.factor(par),mod = "IDM", mod = as.factor(mod),
+         coverage = ifelse(q25<=range_spde& q975>=range_spde,1,0)) -> trues_range_df
+
+
+param_df <- rbind(trues_cov_df, trues_prs_abs_df, trues_sigma_df,
+                  trues_range_df)
+
+levels(param_df$par) <- c(expression(beta[1]),expression(beta[0]^PO),
+                          expression(sigma^SPDE), expression(rho^SPDE))
+
+
+#save(trues_prs_abs_df,file="trues_prs_abs_results.RData")
+
+p1 <- param_df %>%
+  ggplot(aes(x=as.factor(data),y=(MSE))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="",y=expression(MSE~(beta))) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+p2 <- param_df %>%
+  ggplot(aes(x=as.factor(data),y=(bias))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="",y=expression(Bias~(beta))) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+p3 <- param_df %>%
+  ggplot(aes(x=as.factor(data),y=(var))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="Sampling scheme",y=expression(Var~(beta))) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+
+true_value <- c(beta_f[2], beta_f[1], sigma_spde, range_spde)
+param_df$true_value <- rep(true_value, each = 100)
+p_valori <- param_df %>%
+  ggplot(aes(y = Mean)) +
+  geom_boxplot(fill = "skyblue", outlier.color = "red", alpha = 0.7) +
+  facet_wrap(~par, labeller = label_parsed,scales = "free") +
+  geom_hline(aes(yintercept = true_value), color = "red", linetype = "dashed", size = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif", size = 16),
+    strip.text = element_text(size = 18, face = "bold")
+  )
+
+#p1+p2+p3+patchwork::plot_layout(ncol=1)
+
+#ggsave(filename = "true_pres_abs_sim_all.pdf",dpi = 300,height = 4000,width = 3000,units = "px")
+
+param_df|>
+  group_by(par)|>
+  summarise(mean(coverage))
+# param_df %>% 
+#   pivot_longer(cols = c(MSE,bias,var),names_to = "Metric") %>% filter(Metric %in% c("bias","var")) %>%
+#   ggplot(aes(x=as.factor(data),y=(value))) +
+#   geom_boxplot() + facet_grid(Metric~par,labeller = label_parsed ,scales = "free") +
+#   labs(x="Sampling scheme",y=expression(Bias~(beta))) + 
+#   theme(legend.position = 0, text=element_text(family="serif", size=20))
+int_df <- rbind(do.call("rbind",MAE_intensity))
+colnames(int_df)[1] <- "values"
+int_df$id <- rep(c("MAE", "q25", "q975"), 100) 
+int_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "Intensity",par =as.factor(par), mod = "IDM", mod = as.factor(mod)) -> int_df
+gp_df <- rbind(do.call("rbind",MAE_GP))
+colnames(gp_df)[1] <- "values"
+gp_df$id <- rep(c("MAE", "q25", "q975"), 100) 
+gp_df |>
+  pivot_wider(names_from = id, values_from = "values")|>
+  mutate(par = "GP",par =as.factor(par), mod = "IDM", mod = as.factor(mod)) -> gp_df
+
+MAE_pred <- rbind(int_df, gp_df)
+
+p4 <- MAE_pred %>%
+  ggplot(aes(x=as.factor(data),y=(MAE))) +
+  geom_boxplot() + facet_wrap(~par,labeller = label_parsed ,scales = "free") +
+  labs(x="Sampling scheme",y=expression(MAE)) + 
+  theme(legend.position = 0, text=element_text(family="serif", size=20))
+
+
+p_mae <- MAE_pred %>%
+  ggplot(aes(y = MAE)) +
+  geom_boxplot(fill = "skyblue", outlier.color = "red", alpha = 0.7) +
+  facet_wrap(~par, labeller = label_parsed,scales = "free") +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "serif", size = 16),
+    strip.text = element_text(size = 18, face = "bold")
+  )
+
+
+coverage_summary <- param_df %>%
+  group_by(par) %>%
+  summarise(mean_coverage = mean(coverage))
+
+print(coverage_summary)
+
+pdf(file = "Po.pdf", width = 10, height = 8)
+p1
+p2
+p3
+p4
+p_valori
+p_mae
+grid.newpage()
+grid.table(coverage_summary)
 dev.off()
