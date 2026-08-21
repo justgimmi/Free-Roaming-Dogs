@@ -28,7 +28,6 @@ theme_pub <- theme_minimal(base_size = 13) +
     plot.margin     = margin(5, 8, 5, 5)
   )
 
-# common x/y labels — swap for "Longitude"/"Latitude" if xy are lon/lat
 xy_labs <- labs(x = "Easting", y = "Northing")
 
 # ---------------------------------------------------------------------------
