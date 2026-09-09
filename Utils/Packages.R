@@ -31,6 +31,7 @@ require(ggthemes)
 require(scico)
 require(sp)
 require(scales)
+require(grDevices)
 
 
 # ---------------------------------------------------------------------------
@@ -103,3 +104,23 @@ create_boxplot <- function(metric_column,
   
   return(pp)
 }
+
+
+# ---------------------------------------------------------------------------
+# Shared theme Model fitting
+# ---------------------------------------------------------------------------
+theme_pub_fit <- theme_minimal(base_size = 15) +
+  theme(
+    plot.title      = element_text(face = "bold", size = 18, hjust = 0.5,
+                                   margin = margin(b = 6)),
+    axis.title      = element_text(size = 15),
+    axis.text       = element_text(size = 9, colour = "black"),
+    legend.title    = element_text(size = 13),
+    legend.text     = element_text(size = 10),
+    legend.key.width  = unit(0.1, "cm"),
+    legend.key.height = unit(5, "cm"),
+    plot.margin     = margin(5, 8, 5, 5),
+    legend.position = "bottom"
+  )
+
+xy_labs <- labs(x = "South", y = "West")
