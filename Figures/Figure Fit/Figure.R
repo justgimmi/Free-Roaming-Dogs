@@ -198,3 +198,70 @@ p_forest <- ggplot(fx, aes(x = mean, y = term)) +
 p_forest
 
 ggsave(file.path(plot_path, "Forest_Plot.png"), p_forest, width = 7, height = 7.5, dpi = 600)
+
+
+
+
+################ Excursion sets ###############à
+load(file = file.path(path, "Models/fit.RData"))
+
+# single, consistent prediction grid over the study area
+pred_pix <- fm_pixels(mesh, dims = c(300, 300), mask = boundary_sf, format = "sf")
+# quantity of interest: log-density surface underlying the count model
+# (drop the log(effort) offset -- that's a survey-effort term, not part of
+# the intrinsic density we want to threshold)
+pred_formula <- ~ beta0_count + u + hfp_cov + mix_cov + agfor_cov
+
+# posterior mean surface, used only to set a data-driven threshold
+pred_mean <- predict(fit, pred_pix, pred_formula, probs = 0.90)
+
+# threshold: 90th percentile of the fitted intensity surface across the
+# study area (relative-abundance threshold, consistent with the text)
+u_thresh <- mean(pred_mean$q0.9)
+
+# posterior samples of the same linear predictor, for the excursion set
+samps <- generate(fit, newdata = pred_pix, formula = pred_formula, n.samples = 2000)
+
+exc <- excursions.mc(
+  samps,
+  alpha = 0.05,       # 95% simultaneous confidence
+  u     = u_thresh,   # threshold on the predictor's own scale (log-density)
+  type  = ">"         # positive excursion: significantly *above* threshold
+)
+
+pred_pix$F <- exc$F   # excursion function: confidence level of exceedance at s
+pred_pix$E <- exc$E   # -1/0/1 excursion set indicator (1 = confidently above u)
+
+# --- plot ---------------------------------------------------------------
+
+theme_pub <- theme_minimal(base_size = 15) +
+  theme(
+    plot.title      = element_text(face = "bold", size = 18, hjust = 0.5,
+                                   margin = margin(b = 6)),
+    axis.title      = element_text(size = 15),
+    axis.text       = element_text(size = 9, colour = "black"),
+    legend.title    = element_text(size = 13),
+    legend.text     = element_text(size = 10),
+    legend.key.width  = unit(0.35, "cm"),
+    legend.key.height = unit(0.9, "cm"),
+    plot.margin     = margin(5, 8, 5, 5)
+  )
+
+
+
+plotfun <- ggplot(pred_pix) +
+  geom_sf(aes(color = F), size = 0.6) +
+  scale_color_viridis_c(
+    option = "inferno",
+    name   = "Excursion\nconfidence",
+    limits = c(0, 1)
+  ) +
+  geom_sf(
+    data  = st_boundary(boundary_sf),
+    color = "grey20", linewidth = 0.4, inherit.aes = FALSE
+  ) +
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  labs(title = expression(F[u]^"+" * (s)))+
+  theme_pub
+plotfun
+ggsave(file.path(plot_path, "Excursus_Function.png"), plotfun, width = 8, height = 7.5, dpi = 600)

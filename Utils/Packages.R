@@ -32,7 +32,8 @@ require(scico)
 require(sp)
 require(scales)
 require(grDevices)
-
+require(excursions)
+require(latex2exp)
 
 # ---------------------------------------------------------------------------
 # Shared theme
