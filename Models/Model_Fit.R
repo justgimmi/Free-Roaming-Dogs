@@ -99,8 +99,6 @@ plot(wood)
 plot(agfor)
 plot(forest)
 plot(heter)
-plot(cov_scaled$density)
-plot(cov_por$wood)
 # ==========================================================================
 # Model Fitting for 2022
 # ==========================================================================
@@ -113,15 +111,10 @@ mesh <- fm_mesh_2d(
   offset = c(10, 20),
   crs = fm_crs(outline)
 )
-spde_pa <- inla.spde2.pcmatern(
-  mesh = mesh,
-  prior.range = c(10, 0.5),
-  prior.sigma = c(1, 0.05)
-)
 
 spde_co <- inla.spde2.pcmatern(
   mesh = mesh,
-  prior.range = c(50, 0.5),
+  prior.range = c(100, 0.5),
   prior.sigma = c(1, 0.05)
 )
 # dimension of portugal are more less: 561 x 218
@@ -165,7 +158,7 @@ lik_po <- bru_obs(
 )
 
 lik_int <- bru_obs(
-  formula = Presence ~ beta0_pa  + u  +forest_cov+ mix_cov + agfor_cov + hfp_cov + log(.data.$EFFORT/365) ,
+  formula = Presence ~ beta0_pa  + u  +forest_cov+ mix_cov + agfor_cov + hfp_cov + log(.data.$EFFORT) ,
   family = "binomial",
   data = pa_2022,
   domain = list(geometry = mesh),
@@ -178,8 +171,7 @@ lik_count <- bru_obs(
     observation_dogs ~ beta0_count +
     u  + hfp_cov+
     mix_cov +
-    agfor_cov  + 
-    log(effort_walked),
+    agfor_cov  +  log(.data$effort_walked) + log(.data$area) ,
   family = "poisson",
   data = count_dogs,
   domain = list(geometry = mesh)
@@ -190,12 +182,13 @@ fit <- bru(
 )
 
 # save(fit, file = file.path(path, "Models/fit.RData"))
+load(file = file.path(path, "Models/fit.RData"))
 summary(fit)
 Lambda_elev_field <- predict(
   fit,
   fmesher::fm_int(mesh, boundary_sf),
   ~ sum(weight * exp(beta0_count + u  + mix_cov + agfor_cov + hfp_cov ))
-)
+) # estimate of the relative abundance
 ppxl_out <- fm_pixels(mesh, mask = boundary_sf, format = "sf")
 lambda_out <- predict(
   fit,

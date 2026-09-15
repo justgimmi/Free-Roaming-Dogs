@@ -61,17 +61,17 @@ quadriculas_por <- read_sf(file.path(Conteos_folder, "Quadriculas_transectos_Por
 
 count_dogs <- count_data |>
   left_join(
-    quadriculas_por |> select(layer, geometry),
+    quadriculas_por |> select(layer, geometry, area_quadriculas),
     by = "layer"
   ) |>
   st_as_sf() |>
   st_transform(crs)
-
+# count_dogs[44, ]
 # Survey effort = road length surveyed, converted from meters to km
 count_dogs$effort_walked <- count_dogs$Length_roads_m / 1000
-#count_dogs$effort_time <- as.numeric(count_dogs$Effort_minutes)/60
-
-count_dogs[count_dogs$id == 169, ]
+count_dogs$Effort_minutes[44] <- mean(as.numeric(count_dogs$Effort_minutes), na.rm = TRUE)
+count_dogs$effort_time <- as.numeric(count_dogs$Effort_minutes)/(60*24*365)
+count_dogs$area <- as.numeric(count_dogs$area_quadriculas/1e6)
 # Collapse each transect's geometry to its centroid 
 count_dogs <- st_centroid(count_dogs)
 table(count_dogs$id)
@@ -160,8 +160,8 @@ table(collision_dogs$year)
 pa_2022 <- pa_final |>
   filter(years == 2022) |>
   distinct(geometry, .keep_all = TRUE)
-
+pa_2022$EFFORT <- pa_2022$EFFORT/365
 collisions_2022 <- collision_sf |>
   filter(year == 2022) |>
   distinct(geometry, .keep_all = TRUE)
-#save(pa_2022, collisions_2022, count_dogs, file = file.path(data_path, "Model_Data.RData"))
+save(pa_2022, collisions_2022, count_dogs, file = file.path(data_path, "Model_Data.RData"))

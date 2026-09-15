@@ -35,6 +35,7 @@ boundary_union <- st_union(boundary_sf)
 boundary_clean <- st_buffer(boundary_union, dist = 0)
 boundary_final <- st_concave_hull(boundary_clean, ratio = 0.0025) 
 boundary_sf <- boundary_final
+boundary_leaflet  <- st_transform(boundary_sf, 4326)
 outline <-  st_simplify(st_as_sf(boundary_sf), dTolerance = 3)
 mesh <- fm_mesh_2d(
   boundary = list(outline),
@@ -59,35 +60,35 @@ cov_scaled <- cov_ext
 
 hfp <- scale(cov_scaled$hfp)
 hfp[is.na(hfp)] <- 0
-hfp <-  focal(hfp, w=5, fun="mean", 
+hfp <-  focal(hfp, w=3, fun="mean", 
               expand = TRUE, na.rm = T)
 
 
 forest <- scale(cov_scaled$forest)
 forest[is.na(forest)] <- 0
-forest <-  focal(forest, w=5, fun="mean", 
+forest <-  focal(forest, w=3, fun="mean", 
                  expand = TRUE, na.rm = T)
 
 agfor <- scale(cov_scaled$agfor)
 agfor[is.na(agfor)] <- 0
-agfor <-  focal(agfor, w=5, fun="mean", 
+agfor <-  focal(agfor, w=3, fun="mean", 
                 expand = TRUE, na.rm = T)
 
 heter <- scale(cov_scaled$heter)
 heter[is.na(heter)] <- 0
-heter <-  focal(heter, w=5, fun="mean", 
+heter <-  focal(heter, w=3, fun="mean", 
                 expand = TRUE, na.rm = T)
 
 mix <- scale(cov_scaled$mix)
 mix[is.na(mix)] <- 0
-mix <-  focal(mix, w=5, fun="mean", 
+mix <-  focal(mix, w=3, fun="mean", 
               expand = TRUE, na.rm = T)
 
 
 
 Density <- scale(cov_scaled$density_km)
 Density[is.na(Density)] <- 0
-Density <-  focal(Density, w=5, fun="mean", 
+Density <-  focal(Density, w=3, fun="mean", 
                   expand = TRUE, na.rm = T)
 ####### Log-Intensity Plot #####
 load(file = file.path(path, "Models/fit.RData"))
@@ -101,6 +102,13 @@ lambda_out <- predict(
   )
 )
 
+
+# Sys.setenv(CARTO_API_KEY = "cb1_3k4z_1_f9786cc6c5e63462fc3d5337")
+# 
+# map <- leaflet() %>%
+#   addProviderTiles(providers$CartoDB.Positron, options = providerTileOptions(apikey = "cb1_3k4z_1_f9786cc6c5e63462fc3d5337")) %>%
+#   addPolygons(data = boundary_leaflet, color = "black", weight = 2, fillOpacity = 0, group = "Study Area")
+# map
 log_int <- ggplot(lambda_out$lambda_true) +
   geom_sf(aes(color = mean), size = 2) + 
   geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.9) +
@@ -114,10 +122,33 @@ log_int <- ggplot(lambda_out$lambda_true) +
       barheight = unit(0.5, "lines")
     )
   ) +
-  
+  coord_sf(crs = st_crs(4326))+
   labs(title = expression(log(widehat(lambda)(s) )))+
   annotation_scale(location = "bl", width_hint = 0.2) +
   theme_pub_fit
+
+
+# log_int <- ggplot(lambda_out$lambda_true) +
+#   annotation_map_tile(type = "osm", zoomin = 0)+
+#   geom_sf(aes(color = mean), size = 2) + 
+#   geom_sf(data = boundary_sf, fill = NA, color = "black", linewidth = 0.9) +
+#   scale_color_viridis_c(
+#     option = "magma", 
+#     name = "Log-Intensity",
+#     guide = guide_colorbar(
+#       title.position = "top", 
+#       title.hjust = 0.5, 
+#       barwidth = unit(10, "lines"), 
+#       barheight = unit(0.5, "lines")
+#     )
+#   ) +
+#   labs(title = expression(log(widehat(lambda)(s)))) +
+#   annotation_scale(location = "bl", width_hint = 0.2) +
+#   theme_pub_fit    # CartoDB Positron equivalent
+# log_int
+
+
+
 ggsave(file.path(plot_path, "Intensity.png"), log_int, width = 5, height = 7.5, dpi = 600)
 
 ###### Covariates Plot ###### 
@@ -262,6 +293,7 @@ plotfun <- ggplot(pred_pix) +
   ) +
   annotation_scale(location = "bl", width_hint = 0.2) +
   labs(title = expression(F[u]^"+" * (s)))+
+  coord_sf(crs = st_crs(4326))+
   theme_pub
 plotfun
 ggsave(file.path(plot_path, "Excursus_Function.png"), plotfun, width = 8, height = 7.5, dpi = 600)

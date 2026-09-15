@@ -34,6 +34,10 @@ require(scales)
 require(grDevices)
 require(excursions)
 require(latex2exp)
+require(ggspatial)
+require(prettymapr)
+require(rosm)
+require(ggnewscale)
 
 # ---------------------------------------------------------------------------
 # Shared theme
